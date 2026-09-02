@@ -1,0 +1,32 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o topolight ./cmd/topolight
+      - run: ./topolight -version
+  cross:
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        target: [linux/amd64, linux/arm64, darwin/arm64, darwin/amd64, windows/amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: |
+          GOOS=${{ matrix.target }} ; GOOS=${GOOS%/*} GOARCH=${{ matrix.target }} ; GOARCH=${GOARCH#*/}
+          CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags "-s -w" -o /dev/null ./cmd/topolight
