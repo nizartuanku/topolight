@@ -19,7 +19,7 @@ TopoLight watches your switches, routers, firewalls and access points over ICMP 
 - **State engine** — per-device and per-interface state machine with confirmation cycles, hysteresis, flap detection, **topology-aware suppression** (a device behind a dead uplink is *unreachable*, not *down*, and its alert folds under the root cause), site-down collapse, maintenance windows, dedup and re-open.
 - **Notify** — e-mail (SMTP/STARTTLS), Telegram bot, HMAC-signed webhook; grouping, quiet hours, minimum severity.
 - **Console** — overview, topology, alerts (keyboard: `j`/`k`/`a`/`r`), devices and device detail with 24-hour graphs, log explorer with histogram, admin (sites, credentials, notifications, rules, maintenance, users, licence). Dark and light themes, WCAG AA, command palette on `/`.
-- **Storage** — embedded: a JSON snapshot for inventory/topology/alerts, JSONL journals for events and logs (daily, gzip), and a small purpose-built time-series store (60-second raw for 30 days, 5-minute rollups to the retention limit). Nothing to install, nothing to tune.
+- **Storage** — embedded: a JSON snapshot for inventory/topology/alerts, JSONL journals for events and logs (daily, gzip), and a small purpose-built time-series store (deflated chunks; 60-second raw for 7 days, 5-minute rollups to the retention limit). Nothing to install, nothing to tune.
 - **Setup** — a five-step wizard gets the first devices on the map in a few minutes; per-vendor config snippets (SNMP, LLDP, syslog, trap) are generated for you.
 
 ## Quick start
@@ -79,7 +79,7 @@ Read these before you rely on it.
 
 - **Topology comes from LLDP/CDP.** Devices that do not speak either (many ISP CPEs, unmanaged switches, most servers) appear only as *external* nodes or via a manual link. ARP/FDB-based endpoint placement is planned, not shipped.
 - **Traps are SNMP v2c only** in this release (v3 traps and syslog over TLS are on the list). Polling supports v3 authPriv (SHA/SHA-256/MD5 + AES-128/DES).
-- **Metrics are 60-second resolution** for 30 days, then 5-minute averages/min/max until the retention limit. It is not a flow collector: NetFlow/IPFIX/sFlow are not part of 0.1.
+- **Metrics are 60-second resolution** for 7 days (uplinks and device metrics; other ports at 5 minutes from the start), then 5-minute averages/min/max until the retention limit. It is not a flow collector: NetFlow/IPFIX/sFlow are not part of 0.1.
 - **Logs are a searchable journal, not a SIEM.** Filter by device, severity, text and time window; no correlation rules, no long-term analytics.
 - **ICMP on Linux needs** either `CAP_NET_RAW` or the unprivileged ping group range (`sysctl net.ipv4.ping_group_range`); the installer sets the capability. On other operating systems TopoLight runs in SNMP-only reachability mode and says so on the Overview.
 - **Ports 514 and 162 are privileged.** The installer grants `cap_net_bind_service`; otherwise use `-syslog-listen :5514 -trap-listen :1162` and point devices there.
