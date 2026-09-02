@@ -31,6 +31,10 @@ curl -fsSL https://raw.githubusercontent.com/nizartuanku/topolight/main/install.
 # → console on http://<host>:8432 — open it and follow the wizard
 ```
 
+The installer downloads the release tarball, verifies it against `SHA256SUMS`, creates a `topolight` system user, grants the binary `cap_net_raw` + `cap_net_bind_service`, writes `/etc/topolight/topolight.env` and a hardened systemd unit, and starts it. Recorded on a clean Ubuntu 24.04 (systemd 255), unedited:
+
+![install.sh on Ubuntu 24.04: download, checksum, user, capabilities, systemd unit, service active, HTTP 200](docs/img/install.gif)
+
 Docker (build the image from this repo — a published `hexward/topolight` image follows once it has been through the same checks):
 
 ```sh
