@@ -1,0 +1,18 @@
+# build output at the repo root
+/topolight
+# …but never the package directory of the same name — git would otherwise
+# silently ignore every NEW file inside it (found the hard way on other repos)
+!/topolight/
+/topolight-*
+/dist/
+/dist-*/
+*.tar.gz
+*.zip
+SHA256SUMS
+/deliver/
+/.data/
+# seller tooling — never part of the public tree
+/cmd/licgen/
+# issuer material must never be committed
+issuer.key
+*.pem
