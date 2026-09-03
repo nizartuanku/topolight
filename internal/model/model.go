@@ -91,14 +91,19 @@ const (
 
 // Site groups devices.
 type Site struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	Subnets  []string  `json:"subnets"` // CIDRs swept by discovery
-	Lat      float64   `json:"lat,omitempty"`
-	Lon      float64   `json:"lon,omitempty"`
-	Created  time.Time `json:"created"`
-	CredID   string    `json:"cred_id,omitempty"` // default credential for discovery
-	Disabled bool      `json:"disabled,omitempty"`
+	ID      string    `json:"id"`
+	Name    string    `json:"name"`
+	Subnets []string  `json:"subnets"` // CIDRs swept by discovery
+	Lat     float64   `json:"lat,omitempty"`
+	Lon     float64   `json:"lon,omitempty"`
+	Created time.Time `json:"created"`
+	CredID  string    `json:"cred_id,omitempty"` // default credential for discovery
+	// SSHCredID is the default SSH credential for configuration backups.
+	SSHCredID string `json:"ssh_cred_id,omitempty"`
+	// AddPingOnly makes discovery keep hosts that answer ICMP but no SNMP
+	// credential, as ping-only devices (they count toward the device cap).
+	AddPingOnly bool `json:"add_ping_only,omitempty"`
+	Disabled    bool `json:"disabled,omitempty"`
 }
 
 // Credential is an SNMP credential set. Secrets are stored in the data dir
@@ -106,14 +111,33 @@ type Site struct {
 type Credential struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	Version   string `json:"version"` // "2c" | "3"
+	Kind      string `json:"kind,omitempty"` // "" (snmp) | "ssh" | "gnmi"
+	Version   string `json:"version"`        // "2c" | "3"
 	Community string `json:"community,omitempty"`
 	User      string `json:"user,omitempty"`
 	AuthProto string `json:"auth_proto,omitempty"` // sha | sha256 | md5 | ""
 	AuthPass  string `json:"auth_pass,omitempty"`
 	PrivProto string `json:"priv_proto,omitempty"` // aes | aes256 | des | ""
 	PrivPass  string `json:"priv_pass,omitempty"`
+	// SSH (Kind == "ssh"): password and/or private key, optional enable password and port.
+	Password   string `json:"password,omitempty"`
+	PrivateKey string `json:"private_key,omitempty"`
+	EnablePass string `json:"enable_pass,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	// gNMI (Kind == "gnmi"): User/Password as gRPC metadata, Port (default 6030),
+	// TLS on by default, SkipVerify for self-signed device certificates.
+	PlainText  bool `json:"plaintext,omitempty"` // h2c, no TLS
+	SkipVerify bool `json:"skip_verify,omitempty"`
 }
+
+// IsSSH reports whether the credential is for SSH rather than SNMP.
+func (c Credential) IsSSH() bool { return c.Kind == "ssh" }
+
+// IsGNMI reports whether the credential is for gNMI (OpenConfig over gRPC).
+func (c Credential) IsGNMI() bool { return c.Kind == "gnmi" }
+
+// IsSNMP reports whether the credential is an SNMP one.
+func (c Credential) IsSNMP() bool { return c.Kind == "" }
 
 // Redacted returns a copy safe for the API.
 func (c Credential) Redacted() Credential {
@@ -126,27 +150,47 @@ func (c Credential) Redacted() Credential {
 	if c.PrivPass != "" {
 		c.PrivPass = "••••"
 	}
+	if c.Password != "" {
+		c.Password = "••••"
+	}
+	if c.PrivateKey != "" {
+		c.PrivateKey = "••••"
+	}
+	if c.EnablePass != "" {
+		c.EnablePass = "••••"
+	}
 	return c
 }
 
 // Device is a monitored node.
 type Device struct {
-	ID          string    `json:"id"`
-	SiteID      string    `json:"site_id"`
-	Name        string    `json:"name"`
-	IP          string    `json:"ip"`
-	Domain      Domain    `json:"domain"`
-	Role        Role      `json:"role"`
-	RoleLocked  bool      `json:"role_locked,omitempty"`
-	Vendor      string    `json:"vendor,omitempty"`
-	Model       string    `json:"model,omitempty"`
-	OSVersion   string    `json:"os_version,omitempty"`
-	Serial      string    `json:"serial,omitempty"`
-	SysObjectID string    `json:"sys_object_id,omitempty"`
-	SysDescr    string    `json:"sys_descr,omitempty"`
-	Location    string    `json:"location,omitempty"`
-	ChassisMAC  string    `json:"chassis_mac,omitempty"`
-	ProfileID   string    `json:"profile_id,omitempty"`
+	ID          string `json:"id"`
+	SiteID      string `json:"site_id"`
+	Name        string `json:"name"`
+	IP          string `json:"ip"`
+	Domain      Domain `json:"domain"`
+	Role        Role   `json:"role"`
+	RoleLocked  bool   `json:"role_locked,omitempty"`
+	Vendor      string `json:"vendor,omitempty"`
+	Model       string `json:"model,omitempty"`
+	OSVersion   string `json:"os_version,omitempty"`
+	Serial      string `json:"serial,omitempty"`
+	SysObjectID string `json:"sys_object_id,omitempty"`
+	SysDescr    string `json:"sys_descr,omitempty"`
+	Location    string `json:"location,omitempty"`
+	ChassisMAC  string `json:"chassis_mac,omitempty"`
+	ProfileID   string `json:"profile_id,omitempty"`
+	// SSHCredID selects the SSH credential for configuration backups
+	// (empty: the site's default). BackupEvery is hours between backups
+	// (0: the global default; -1: never for this device).
+	SSHCredID   string `json:"ssh_cred_id,omitempty"`
+	BackupEvery int    `json:"backup_every,omitempty"`
+	// Managed marks a device that an integration owns ("unifi:<id>", "meraki:<id>",
+	// "wlc:<controller device id>"): its status comes from the controller, not from SNMP.
+	Managed string `json:"managed,omitempty"`
+	// PingOnly devices are watched with ICMP alone: no SNMP, no interfaces,
+	// no inventory — reachability, RTT, loss and jitter only.
+	PingOnly    bool      `json:"ping_only,omitempty"`
 	CredID      string    `json:"cred_id,omitempty"`
 	PollEvery   int       `json:"poll_every"` // seconds
 	Monitored   bool      `json:"monitored"`  // false when over tier cap or disabled
@@ -350,6 +394,219 @@ type User struct {
 	Disabled bool      `json:"disabled,omitempty"`
 }
 
+// Probe is a synthetic check run from the TopoLight host: is the service
+// there, how fast, and (TLS) for how long is the certificate still good.
+type Probe struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Type     string    `json:"type"`   // tcp|http|dns|tls|ping|traceroute
+	Target   string    `json:"target"` // host:port | URL | name | host
+	Every    int       `json:"every"`  // seconds
+	Timeout  int       `json:"timeout"`
+	Expect   string    `json:"expect,omitempty"`   // http: "200-299" or "body:text"; dns: expected address; tls: min days
+	Resolver string    `json:"resolver,omitempty"` // dns: server host[:port]
+	DeviceID string    `json:"device_id,omitempty"`
+	SiteID   string    `json:"site_id,omitempty"`
+	Enabled  bool      `json:"enabled"`
+	Created  time.Time `json:"created"`
+}
+
+// ProbeResult is one run.
+type ProbeResult struct {
+	ProbeID string            `json:"probe_id"`
+	TS      time.Time         `json:"ts"`
+	OK      bool              `json:"ok"`
+	Ms      float64           `json:"ms"`
+	Detail  string            `json:"detail,omitempty"`
+	Attrs   map[string]string `json:"attrs,omitempty"`
+}
+
+// Report is a saved report definition, optionally scheduled by e-mail.
+type Report struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Sections []string  `json:"sections"` // availability|alerts|utilisation|inventory|changes|flow|endpoints|probes
+	Period   string    `json:"period"`   // 24h|7d|30d
+	SiteID   string    `json:"site_id,omitempty"`
+	Schedule string    `json:"schedule,omitempty"` // ""|daily|weekly|monthly
+	Hour     int       `json:"hour"`               // local hour for the schedule
+	EmailTo  []string  `json:"email_to,omitempty"`
+	Enabled  bool      `json:"enabled"`
+	Created  time.Time `json:"created"`
+	LastRun  time.Time `json:"last_run,omitempty"`
+	LastErr  string    `json:"last_error,omitempty"`
+}
+
+// Integration is a controller or cloud API TopoLight reads (wireless, SD-WAN).
+type Integration struct {
+	ID       string    `json:"id"`
+	Kind     string    `json:"kind"` // unifi|meraki
+	Name     string    `json:"name"`
+	URL      string    `json:"url,omitempty"`      // unifi: https://controller:8443 ; meraki: default https://api.meraki.com
+	Site     string    `json:"site,omitempty"`     // unifi site name (default "default"); meraki organisation id ("" = all)
+	Username string    `json:"username,omitempty"` // unifi local user (read-only is enough)
+	Password string    `json:"password,omitempty"`
+	APIKey   string    `json:"api_key,omitempty"` // meraki
+	Insecure bool      `json:"insecure,omitempty"`
+	SiteID   string    `json:"site_id,omitempty"` // TopoLight site the imported devices belong to
+	Every    int       `json:"every"`             // seconds (default 60)
+	Enabled  bool      `json:"enabled"`
+	Created  time.Time `json:"created"`
+	LastRun  time.Time `json:"last_run,omitempty"`
+	LastErr  string    `json:"last_error,omitempty"`
+	Devices  int       `json:"devices,omitempty"`
+	Clients  int       `json:"clients,omitempty"`
+}
+
+// Redacted hides secrets.
+func (i Integration) Redacted() Integration {
+	if i.Password != "" {
+		i.Password = "••••"
+	}
+	if i.APIKey != "" {
+		i.APIKey = "••••"
+	}
+	return i
+}
+
+// Wireless is the per-access-point (or per-controller) wireless state.
+type Wireless struct {
+	DeviceID   string         `json:"device_id"`
+	TS         time.Time      `json:"ts"`
+	Clients    int            `json:"clients"`
+	Radios     []Radio        `json:"radios,omitempty"`
+	SSIDs      map[string]int `json:"ssids,omitempty"` // clients per SSID
+	Controller string         `json:"controller,omitempty"`
+	Model      string         `json:"model,omitempty"`
+	Version    string         `json:"version,omitempty"`
+	Upgradable bool           `json:"upgradable,omitempty"`
+	Satisf     int            `json:"satisfaction,omitempty"` // 0–100 (UniFi)
+	APs        int            `json:"aps,omitempty"`          // controllers: managed APs
+	APsUp      int            `json:"aps_up,omitempty"`
+}
+
+// Radio is one radio of an access point.
+type Radio struct {
+	Name    string  `json:"name"` // ng, na, 6e
+	Channel int     `json:"channel"`
+	Width   int     `json:"width,omitempty"`
+	TxPower int     `json:"tx_power,omitempty"` // dBm
+	TxLevel int     `json:"tx_level,omitempty"` // Cisco power level 1 (max) … 8 when dBm is not reported
+	Clients int     `json:"clients"`
+	Util    float64 `json:"util_pct,omitempty"` // channel utilisation
+}
+
+// SDWANChanges compares two path lists and returns the paths that went down
+// (including paths seen down for the first time) and the ones that recovered.
+func SDWANChanges(prev, cur []SDWANLink) (down, up []SDWANLink) {
+	was := map[string]bool{}
+	had := map[string]bool{}
+	for _, l := range prev {
+		was[l.Name+"|"+l.Interface], had[l.Name+"|"+l.Interface] = l.Up, true
+	}
+	for _, l := range cur {
+		k := l.Name + "|" + l.Interface
+		switch {
+		case !l.Up && (!had[k] || was[k]):
+			down = append(down, l)
+		case l.Up && had[k] && !was[k]:
+			up = append(up, l)
+		}
+	}
+	return
+}
+
+// SDWANLink is one WAN path with its health.
+type SDWANLink struct {
+	DeviceID  string    `json:"device_id"`
+	Name      string    `json:"name"` // health-check / uplink name
+	Interface string    `json:"interface"`
+	Up        bool      `json:"up"`
+	State     string    `json:"state"`
+	LatencyMs float64   `json:"latency_ms"`
+	JitterMs  float64   `json:"jitter_ms"`
+	LossPct   float64   `json:"loss_pct"`
+	IP        string    `json:"ip,omitempty"`
+	TS        time.Time `json:"ts"`
+}
+
+// Routing and layer-2 state of a device, refreshed every 5 minutes.
+type Routing struct {
+	DeviceID string    `json:"device_id"`
+	TS       time.Time `json:"ts"`
+	Routes   int       `json:"routes,omitempty"` // ipCidrRouteNumber / inetCidrRouteNumber
+	BGP      []BGPPeer `json:"bgp,omitempty"`
+	OSPF     []OSPFNbr `json:"ospf,omitempty"`
+	VLANs    []VLAN    `json:"vlans,omitempty"`
+	STP      *STP      `json:"stp,omitempty"`
+	LAGs     []LAG     `json:"lags,omitempty"`
+	LocalAS  int64     `json:"local_as,omitempty"`
+	RouterID string    `json:"router_id,omitempty"`
+}
+
+// BGPPeer is one row of bgpPeerTable (+ Cisco prefix counts when available).
+type BGPPeer struct {
+	Peer      string `json:"peer"`
+	RemoteAS  int64  `json:"remote_as"`
+	State     string `json:"state"` // idle|connect|active|opensent|openconfirm|established
+	Up        bool   `json:"up"`
+	UptimeS   int64  `json:"uptime_s"`
+	Prefixes  int64  `json:"prefixes,omitempty"` // accepted prefixes (Cisco/Juniper/Arista extensions)
+	LastError string `json:"last_error,omitempty"`
+}
+
+// OSPFNbr is one row of ospfNbrTable.
+type OSPFNbr struct {
+	Neighbor string `json:"neighbor"` // ip
+	RouterID string `json:"router_id"`
+	State    string `json:"state"` // down|attempt|init|twoWay|exchangeStart|exchange|loading|full
+	Full     bool   `json:"full"`
+	Priority int    `json:"priority"`
+}
+
+// VLAN is one row of dot1qVlanStaticTable.
+type VLAN struct {
+	ID    int      `json:"id"`
+	Name  string   `json:"name"`
+	Ports []string `json:"ports,omitempty"` // interface names (egress members), capped
+	NPort int      `json:"nport"`
+}
+
+// STP is the bridge's spanning-tree summary (dot1dStp).
+type STP struct {
+	Protocol     string   `json:"protocol,omitempty"`
+	BridgeID     string   `json:"bridge_id,omitempty"`
+	RootID       string   `json:"root_id,omitempty"`
+	IsRoot       bool     `json:"is_root"`
+	RootPort     string   `json:"root_port,omitempty"`
+	RootCost     int64    `json:"root_cost"`
+	TopChanges   int64    `json:"top_changes"`
+	LastChangeS  int64    `json:"last_change_s"` // seconds since the last topology change
+	Forwarding   int      `json:"forwarding"`
+	Blocking     int      `json:"blocking"`
+	BlockedPorts []string `json:"blocked_ports,omitempty"`
+}
+
+// LAG is one aggregate with its members (IEEE8023-LAG-MIB).
+type LAG struct {
+	Name    string   `json:"name"`
+	Members []string `json:"members"`
+	Up      int      `json:"up"` // members that are attached and oper-up
+}
+
+// APIToken is a bearer token for scripts (Authorization: Bearer tl_…). Only
+// the SHA-256 of the secret is stored; the secret is shown once at creation.
+type APIToken struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Role     string    `json:"role"` // viewer|operator|admin — never above the creator's role
+	Hash     string    `json:"hash"` // hex sha256 of the secret
+	Prefix   string    `json:"prefix"`
+	Created  time.Time `json:"created"`
+	LastUsed time.Time `json:"last_used,omitempty"`
+	Creator  string    `json:"creator,omitempty"`
+}
+
 // Rule is an alert rule. Defaults ship embedded; admins override per object.
 type Rule struct {
 	ID          string   `json:"id"`
@@ -394,6 +651,12 @@ type Settings struct {
 	TopologyEvery  int    `json:"topology_every"`  // minutes
 	SetupDone      bool   `json:"setup_done"`
 	Timezone       string `json:"timezone,omitempty"`
+	// SNMPv3 engine identity of this receiver (informs): hex engine id and
+	// the boots counter, incremented at every start.
+	EngineID    string `json:"engine_id,omitempty"`
+	EngineBoots int32  `json:"engine_boots,omitempty"`
+	// BackupEveryHours is how often configurations are pulled over SSH (default 24; 0 disables).
+	BackupEveryHours int `json:"backup_every_hours"`
 }
 
 var idCounter uint64
