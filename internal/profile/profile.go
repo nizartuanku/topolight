@@ -139,6 +139,43 @@ var builtin = []Profile{
 		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, Priority: 5},
 	{ID: "net-snmp", Vendor: "Linux (net-snmp)", Match: []string{"1.3.6.1.4.1.8072"}, Role: model.RoleServer,
 		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, Priority: 3},
+	// firewalls built on net-snmp: same OIDs, better role
+	{ID: "pfsense", Vendor: "pfSense/OPNsense", Match: nil, DescrMatch: `(?i)pfsense|opnsense`, Role: model.RoleFirewall, Domain: model.DomainSecurity,
+		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, Priority: 6},
+	{ID: "vyos", Vendor: "VyOS", Match: nil, DescrMatch: `(?i)vyos|vyatta`, Role: model.RoleRouter,
+		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, Priority: 6},
+	// v0.4 vendor profiles. Where a vendor's CPU/memory OID is not certain the
+	// profile leaves it out and the poller falls back to HOST-RESOURCES-MIB.
+	{ID: "arista", Vendor: "Arista", Match: []string{"1.3.6.1.4.1.30065"}, Role: model.RoleCore,
+		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, Priority: 6},
+	{ID: "extreme-exos", Vendor: "Extreme", Match: []string{"1.3.6.1.4.1.1916"}, Role: model.RoleAccess,
+		CPU: &Metric{OID: "1.3.6.1.4.1.1916.1.32.1.2.0"}, LLDP: true, Priority: 6}, // extremeCpuMonitorTotalUtilization
+	{ID: "hpe-comware", Vendor: "HPE Comware/H3C", Match: []string{"1.3.6.1.4.1.25506", "1.3.6.1.4.1.2011.10"}, Role: model.RoleAccess,
+		CPU: &Metric{OID: "1.3.6.1.4.1.25506.2.6.1.1.1.1.6", Walk: true, Agg: "avg"}, MemUsed: &Metric{OID: "1.3.6.1.4.1.25506.2.6.1.1.1.1.8", Walk: true, Agg: "avg"}, MemIsPct: true,
+		Temp: &Metric{OID: "1.3.6.1.4.1.25506.2.6.1.1.1.1.12", Walk: true, Agg: "max"}, LLDP: true, Priority: 6}, // hh3cEntityExtCpuUsage / MemUsage / Temperature
+	{ID: "dell-os10", Vendor: "Dell", Match: []string{"1.3.6.1.4.1.674.11000.5000.100"}, Role: model.RoleAccess,
+		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, Priority: 6},
+	{ID: "ruckus-icx", Vendor: "Ruckus/Brocade ICX", Match: []string{"1.3.6.1.4.1.1991"}, Role: model.RoleAccess,
+		CPU: &Metric{OID: "1.3.6.1.4.1.1991.1.1.2.1.52.0"}, MemUsed: &Metric{OID: "1.3.6.1.4.1.1991.1.1.2.1.53.0"}, MemIsPct: true, LLDP: true, Priority: 6}, // snAgGblCpuUtil1MinAvg / snAgGblDynMemUtil
+	{ID: "checkpoint", Vendor: "Check Point", Match: []string{"1.3.6.1.4.1.2620"}, Role: model.RoleFirewall, Domain: model.DomainSecurity,
+		CPU: &Metric{OID: "1.3.6.1.4.1.2620.1.6.7.2.4.0"}, Sessions: &Metric{OID: "1.3.6.1.4.1.2620.1.1.25.3.0"}, LLDP: false, Priority: 7}, // procUsage / fwNumConn
+	{ID: "sonicwall", Vendor: "SonicWall", Match: []string{"1.3.6.1.4.1.8741"}, Role: model.RoleFirewall, Domain: model.DomainSecurity,
+		CPU: &Metric{OID: "1.3.6.1.4.1.8741.1.3.1.3.0"}, MemUsed: &Metric{OID: "1.3.6.1.4.1.8741.1.3.1.4.0"}, MemIsPct: true, Sessions: &Metric{OID: "1.3.6.1.4.1.8741.1.3.1.1.0"}, LLDP: false, Priority: 7}, // sonicCurrentCPUUtil / sonicCurrentRAMUtil / sonicCurrentConnCacheEntries
+	{ID: "watchguard", Vendor: "WatchGuard", Match: []string{"1.3.6.1.4.1.3097"}, Role: model.RoleFirewall, Domain: model.DomainSecurity,
+		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: false, Priority: 7},
+	{ID: "sophos", Vendor: "Sophos", Match: []string{"1.3.6.1.4.1.2604"}, Role: model.RoleFirewall, Domain: model.DomainSecurity,
+		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: false, Priority: 7},
+	{ID: "zyxel", Vendor: "Zyxel", Match: []string{"1.3.6.1.4.1.890"}, Role: model.RoleAccess,
+		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, Priority: 5},
+	{ID: "tplink", Vendor: "TP-Link", Match: []string{"1.3.6.1.4.1.11863"}, Role: model.RoleAccess,
+		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, Priority: 5},
+	{ID: "meraki", Vendor: "Cisco Meraki", Match: []string{"1.3.6.1.4.1.29671"}, Role: model.RoleAccess, LLDP: true, Priority: 6},
+	{ID: "cisco-wlc", Vendor: "Cisco (wireless controller)", Match: []string{"1.3.6.1.4.1.9.1.1069", "1.3.6.1.4.1.9.1.1279", "1.3.6.1.4.1.9.1.1615", "1.3.6.1.4.1.9.1.2170", "1.3.6.1.4.1.9.1.2370", "1.3.6.1.4.1.14179"}, DescrMatch: `(?i)wireless lan controller|wlc|catalyst 9800`, Role: model.RoleOther,
+		CPU: &Metric{OID: "1.3.6.1.4.1.14179.1.1.5.1.0"}, LLDP: true, CDP: true, Priority: 8}, // agentCurrentCPUUtilization (AIRESPACE-SWITCHING-MIB)
+	{ID: "aruba-controller", Vendor: "Aruba (mobility controller)", Match: []string{"1.3.6.1.4.1.14823"}, Role: model.RoleOther,
+		CPU: &Metric{OID: "1.3.6.1.4.1.14823.2.2.1.1.1.9.1.3", Walk: true, Agg: "avg"}, MemUsed: &Metric{OID: "1.3.6.1.4.1.14823.2.2.1.1.1.11.1.4.1"}, MemFree: &Metric{OID: "1.3.6.1.4.1.14823.2.2.1.1.1.11.1.5.1"}, LLDP: true, Priority: 7}, // wlsxSysExtProcessorLoad / wlsxSysExtMemoryUsed/Free
+	{ID: "cambium", Vendor: "Cambium", Match: []string{"1.3.6.1.4.1.17713"}, Role: model.RoleAP,
+		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, Priority: 5},
 	{ID: "generic", Vendor: "", Match: []string{"1"}, Role: model.RoleOther,
 		CPU: &Metric{OID: OIDHrProcessorLoad, Walk: true, Agg: "avg"}, LLDP: true, CDP: false, Priority: 0},
 }
