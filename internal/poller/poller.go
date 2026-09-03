@@ -13,20 +13,36 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nizartuanku/topolight/internal/endpoint"
+	"github.com/nizartuanku/topolight/internal/gnmi"
 	"github.com/nizartuanku/topolight/internal/icmp"
 	"github.com/nizartuanku/topolight/internal/model"
 	"github.com/nizartuanku/topolight/internal/profile"
 	"github.com/nizartuanku/topolight/internal/snmp"
 	"github.com/nizartuanku/topolight/internal/store"
-	"github.com/nizartuanku/topolight/internal/tsdb"
 )
 
 // Poller owns the polling schedule.
+// MetricSink receives samples; the local TSDB, or a cluster forwarder.
+type MetricSink interface {
+	Append(series string, t int64, v float64)
+}
+
 type Poller struct {
 	st   *store.Store
-	db   *tsdb.DB
+	db   MetricSink
 	lib  *profile.Library
 	ping *icmp.Pinger
+	// assigned, when non-nil, restricts polling to these device ids (cluster sharding)
+	assigned map[string]bool
+	// NoRouting disables the routing/L2 walk (cluster standbys: the leader owns it).
+	NoRouting bool
+	// Caps reports (licence device limit, monitored devices) so controller-discovered
+	// access points stop at the cap; nil = unlimited.
+	Caps func() (int, int)
+	// InventoryAll makes this node run the 15-minute inventory walk for devices
+	// polled elsewhere too (the cluster leader owns the inventory).
+	InventoryAll bool
 
 	Workers int
 	// Outputs. The state engine must drain these.
@@ -40,11 +56,17 @@ type Poller struct {
 	counters map[string]*ifCounters
 	uptime   map[string]int64
 	inflight map[string]bool
+	epAt     map[string]time.Time // last endpoint (FDB/ARP) walk
 	clients  map[string]*snmp.Client
+	gnmis    map[string]*gnmi.Client
 	creds    map[string]string // device id -> cred fingerprint for client reuse
+	// Endpoints (MAC/ARP tables); nil disables. EndpointEvery defaults to 5 minutes.
+	Endpoints     *endpoint.Store
+	EndpointEvery time.Duration
 	// Stats
 	Cycles   int64
 	Failures int64
+	EPWalks  int64
 }
 
 type ifCounters struct {
@@ -59,11 +81,11 @@ type ifCounters struct {
 }
 
 // New creates a poller. ping may be nil (ICMP disabled).
-func New(st *store.Store, db *tsdb.DB, lib *profile.Library, ping *icmp.Pinger) *Poller {
+func New(st *store.Store, db MetricSink, lib *profile.Library, ping *icmp.Pinger) *Poller {
 	return &Poller{st: st, db: db, lib: lib, ping: ping, Workers: 48,
 		DeviceSamples: make(chan model.DeviceSample, 4096), InterfaceSamples: make(chan model.InterfaceSample, 65536), Events: make(chan model.Event, 4096),
 		next: map[string]time.Time{}, invAt: map[string]time.Time{}, counters: map[string]*ifCounters{}, uptime: map[string]int64{},
-		inflight: map[string]bool{}, clients: map[string]*snmp.Client{}, creds: map[string]string{}}
+		inflight: map[string]bool{}, epAt: map[string]time.Time{}, clients: map[string]*snmp.Client{}, creds: map[string]string{}}
 }
 
 // Run schedules until ctx ends.
@@ -79,10 +101,35 @@ func (p *Poller) Run(ctx context.Context) {
 		}
 		now := time.Now()
 		for _, d := range p.st.Devices() {
-			if !d.Monitored {
+			if !d.Monitored || d.Managed != "" {
+				// managed devices are reported by their controller integration
 				continue
 			}
 			p.mu.Lock()
+			if p.assigned != nil && !p.assigned[d.ID] {
+				// not ours to poll; the leader still keeps the inventory fresh
+				invDue := p.InventoryAll && !d.PingOnly && (p.invAt[d.ID].IsZero() || now.Sub(p.invAt[d.ID]) > 15*time.Minute) && !p.inflight[d.ID]
+				if invDue {
+					p.inflight[d.ID] = true
+					p.invAt[d.ID] = now
+				}
+				p.mu.Unlock()
+				if invDue {
+					select {
+					case sem <- struct{}{}:
+					case <-ctx.Done():
+						return
+					}
+					go func(d model.Device) {
+						defer func() { <-sem }()
+						p.inventoryOnly(ctx, d)
+						p.mu.Lock()
+						p.inflight[d.ID] = false
+						p.mu.Unlock()
+					}(d)
+				}
+				continue
+			}
 			nx, ok := p.next[d.ID]
 			if !ok {
 				// spread first polls over the interval
@@ -118,6 +165,56 @@ func (p *Poller) Run(ctx context.Context) {
 	}
 }
 
+// SetSink replaces the metric sink (cluster forwarder on standby nodes).
+func (p *Poller) SetSink(s MetricSink) {
+	p.mu.Lock()
+	p.db = s
+	p.mu.Unlock()
+}
+
+// SetAssigned restricts polling to the given device ids (nil = every device).
+func (p *Poller) SetAssigned(ids []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if ids == nil {
+		p.assigned = nil
+		return
+	}
+	m := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		m[id] = true
+	}
+	p.assigned = m
+}
+
+// Assigned returns how many devices this node polls (-1 = all).
+func (p *Poller) Assigned() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.assigned == nil {
+		return -1
+	}
+	return len(p.assigned)
+}
+
+// inventoryOnly refreshes identity, interfaces and neighbours without
+// touching counters (cluster leader, for devices polled by other nodes).
+func (p *Poller) inventoryOnly(ctx context.Context, d model.Device) {
+	c, err := p.ClientFor(d)
+	if err != nil {
+		return
+	}
+	vbs, err := c.Get(profile.OIDSysName)
+	if err != nil {
+		return
+	}
+	sysName := ""
+	if len(vbs) > 0 {
+		sysName = vbs[0].Value.String()
+	}
+	p.inventory(ctx, c, &d, sysName)
+}
+
 // PollNow asks for an immediate poll of a device (e.g. after a trap).
 func (p *Poller) PollNow(deviceID string) {
 	p.mu.Lock()
@@ -127,7 +224,11 @@ func (p *Poller) PollNow(deviceID string) {
 
 // Forget drops per-device state (after deletion).
 func (p *Poller) Forget(deviceID string) {
+	if p.Endpoints != nil {
+		p.Endpoints.Forget(deviceID)
+	}
 	p.mu.Lock()
+	delete(p.epAt, deviceID)
 	defer p.mu.Unlock()
 	delete(p.next, deviceID)
 	delete(p.invAt, deviceID)
@@ -149,6 +250,9 @@ func (p *Poller) ClientFor(d model.Device) (*snmp.Client, error) {
 	cred, err := p.credFor(d)
 	if err != nil {
 		return nil, err
+	}
+	if cred.IsGNMI() {
+		return nil, fmt.Errorf("credential %s is a gNMI credential, not SNMP", cred.Name)
 	}
 	fp := cred.ID + "|" + cred.Version + "|" + cred.Community + "|" + cred.User + "|" + cred.AuthProto + "|" + cred.AuthPass + "|" + cred.PrivProto + "|" + cred.PrivPass + "|" + d.IP
 	p.mu.Lock()
@@ -186,13 +290,18 @@ func (p *Poller) credFor(d model.Device) (model.Credential, error) {
 		}
 	}
 	if id == "" {
-		creds := p.st.Creds()
-		if len(creds) == 0 {
-			return model.Credential{}, fmt.Errorf("no SNMP credential configured")
+		for _, c := range p.st.Creds() {
+			if c.IsSNMP() {
+				return c, nil
+			}
 		}
-		return creds[0], nil
+		return model.Credential{}, fmt.Errorf("no SNMP credential configured")
 	}
-	return p.st.Cred(id)
+	c, err := p.st.Cred(id)
+	if err == nil && c.IsSSH() {
+		return model.Credential{}, fmt.Errorf("credential %s is an SSH credential, not SNMP", c.Name)
+	}
+	return c, err
 }
 
 func (p *Poller) emitEvent(e model.Event) {
@@ -223,6 +332,20 @@ func (p *Poller) pollDevice(ctx context.Context, d model.Device) {
 			p.db.Append("icmp_rtt_ms|"+d.ID, now.Unix(), ds.RTTms)
 			p.db.Append("icmp_loss_pct|"+d.ID, now.Unix(), ds.LossPct)
 		}
+	}
+
+	if d.PingOnly {
+		// nothing more to ask: the sample carries reachability and RTT only
+		if p.ping == nil {
+			ds.Err = "ping-only device but ICMP is unavailable on this host"
+		}
+		p.publishDevice(ds)
+		return
+	}
+
+	if cred, err := p.credFor(d); err == nil && cred.IsGNMI() {
+		p.pollGNMI(ctx, d, cred, &ds)
+		return
 	}
 
 	// SNMP
@@ -335,6 +458,29 @@ func (p *Poller) pollDevice(ctx context.Context, d model.Device) {
 		}
 	}
 	p.publishDevice(ds)
+
+	// Slow cycle every 5 minutes: endpoint tables (MAC forwarding + ARP/ND)
+	// and routing / layer-2 protocol state
+	every := p.EndpointEvery
+	if every <= 0 {
+		every = 5 * time.Minute
+	}
+	p.mu.Lock()
+	last := p.epAt[d.ID]
+	slowDue := last.IsZero() || now.Sub(last) >= every
+	if slowDue {
+		p.epAt[d.ID] = now
+	}
+	p.mu.Unlock()
+	if slowDue {
+		if p.Endpoints != nil {
+			p.pollEndpoints(ctx, c, d, now)
+		}
+		if !p.NoRouting {
+			p.pollRouting(ctx, c, d, now)
+			p.pollWireless(ctx, c, d, now)
+		}
+	}
 }
 
 func (p *Poller) publishDevice(ds model.DeviceSample) {
@@ -675,68 +821,76 @@ func (p *Poller) pollInterfaces(ctx context.Context, c *snmp.Client, d model.Dev
 		} else {
 			cur.inPkt, cur.outPkt = uint64(inPkt[idx].Int), uint64(outPkt[idx].Int)
 		}
-		p.mu.Lock()
-		prev := p.counters[i.ID]
-		p.counters[i.ID] = cur
-		p.mu.Unlock()
-		if prev != nil && !ds.Rebooted && cur.uptime >= prev.uptime {
-			dt := now.Sub(prev.ts).Seconds()
-			if dt >= 1 {
-				s.InBps = rate(prev.inOct, cur.inOct, hc, dt) * 8
-				s.OutBps = rate(prev.outOct, cur.outOct, hc, dt) * 8
-				s.InErrRate = rate(prev.inErr, cur.inErr, false, dt)
-				s.OutErrRate = rate(prev.outErr, cur.outErr, false, dt)
-				s.InPps = rate(prev.inPkt, cur.inPkt, hcPkt, dt)
-				s.OutPps = rate(prev.outPkt, cur.outPkt, hcPkt, dt)
-				s.InDropRate = rate(prev.inDrp, cur.inDrp, false, dt)
-				s.OutDropRate = rate(prev.outDrp, cur.outDrp, false, dt)
-				s.HaveRates = true
-				if i.SpeedMbps > 0 {
-					s.InUtil = s.InBps * 100 / (float64(i.SpeedMbps) * 1e6)
-					s.OutUtil = s.OutBps * 100 / (float64(i.SpeedMbps) * 1e6)
-				}
-				// important interfaces (uplinks, LLDP peers, starred) keep every
-				// sample; the rest are stored every 5 minutes — live rates in
-				// the console are unaffected, only history is coarser.
-				store := i.Important || prev.lastStore.IsZero() || now.Sub(prev.lastStore) >= 5*time.Minute
-				if store {
-					ts := now.Unix()
-					p.db.Append("if_in_bps|"+i.ID, ts, s.InBps)
-					p.db.Append("if_out_bps|"+i.ID, ts, s.OutBps)
-					if s.InErrRate > 0 || s.OutErrRate > 0 {
-						p.db.Append("if_in_err|"+i.ID, ts, s.InErrRate)
-						p.db.Append("if_out_err|"+i.ID, ts, s.OutErrRate)
-					}
-					// drops behave like errors: a series only exists while they happen.
-					if s.InDropRate > 0 || s.OutDropRate > 0 {
-						p.db.Append("if_in_drop|"+i.ID, ts, s.InDropRate)
-						p.db.Append("if_out_drop|"+i.ID, ts, s.OutDropRate)
-					}
-					// packet rates are kept for important interfaces only, so the
-					// documented per-port storage cost is unchanged for the rest.
-					if i.Important {
-						p.db.Append("if_in_pps|"+i.ID, ts, s.InPps)
-						p.db.Append("if_out_pps|"+i.ID, ts, s.OutPps)
-					}
-					p.mu.Lock()
-					if c := p.counters[i.ID]; c != nil {
-						c.lastStore = now
-					}
-					p.mu.Unlock()
-				} else {
-					p.mu.Lock()
-					if c := p.counters[i.ID]; c != nil {
-						c.lastStore = prev.lastStore
-					}
-					p.mu.Unlock()
-				}
-			}
-		}
+		p.ifRates(i, &s, cur, now, ds.Rebooted)
 		select {
 		case p.InterfaceSamples <- s:
 		default:
 		}
 	}
+}
+
+// ifRates turns two counter snapshots into rates on the sample and stores the
+// history points (every cycle for important interfaces, every 5 minutes for the
+// rest). Shared by the SNMP and gNMI paths.
+func (p *Poller) ifRates(i model.Interface, s *model.InterfaceSample, cur *ifCounters, now time.Time, rebooted bool) {
+	hc, hcPkt := cur.hc, cur.hcPkt
+	p.mu.Lock()
+	prev := p.counters[i.ID]
+	p.counters[i.ID] = cur
+	p.mu.Unlock()
+	if prev == nil || rebooted || cur.uptime < prev.uptime {
+		return
+	}
+	dt := now.Sub(prev.ts).Seconds()
+	if dt < 1 {
+		return
+	}
+	s.InBps = rate(prev.inOct, cur.inOct, hc, dt) * 8
+	s.OutBps = rate(prev.outOct, cur.outOct, hc, dt) * 8
+	s.InErrRate = rate(prev.inErr, cur.inErr, false, dt)
+	s.OutErrRate = rate(prev.outErr, cur.outErr, false, dt)
+	s.InPps = rate(prev.inPkt, cur.inPkt, hcPkt, dt)
+	s.OutPps = rate(prev.outPkt, cur.outPkt, hcPkt, dt)
+	s.InDropRate = rate(prev.inDrp, cur.inDrp, false, dt)
+	s.OutDropRate = rate(prev.outDrp, cur.outDrp, false, dt)
+	s.HaveRates = true
+	if i.SpeedMbps > 0 {
+		s.InUtil = s.InBps * 100 / (float64(i.SpeedMbps) * 1e6)
+		s.OutUtil = s.OutBps * 100 / (float64(i.SpeedMbps) * 1e6)
+	}
+	// important interfaces (uplinks, LLDP peers, starred) keep every
+	// sample; the rest are stored every 5 minutes — live rates in
+	// the console are unaffected, only history is coarser.
+	store := i.Important || prev.lastStore.IsZero() || now.Sub(prev.lastStore) >= 5*time.Minute
+	if store {
+		ts := now.Unix()
+		p.db.Append("if_in_bps|"+i.ID, ts, s.InBps)
+		p.db.Append("if_out_bps|"+i.ID, ts, s.OutBps)
+		if s.InErrRate > 0 || s.OutErrRate > 0 {
+			p.db.Append("if_in_err|"+i.ID, ts, s.InErrRate)
+			p.db.Append("if_out_err|"+i.ID, ts, s.OutErrRate)
+		}
+		// drops behave like errors: a series only exists while they happen.
+		if s.InDropRate > 0 || s.OutDropRate > 0 {
+			p.db.Append("if_in_drop|"+i.ID, ts, s.InDropRate)
+			p.db.Append("if_out_drop|"+i.ID, ts, s.OutDropRate)
+		}
+		// packet rates are kept for important interfaces only, so the
+		// documented per-port storage cost is unchanged for the rest.
+		if i.Important {
+			p.db.Append("if_in_pps|"+i.ID, ts, s.InPps)
+			p.db.Append("if_out_pps|"+i.ID, ts, s.OutPps)
+		}
+	}
+	p.mu.Lock()
+	if c := p.counters[i.ID]; c != nil {
+		if store {
+			c.lastStore = now
+		} else {
+			c.lastStore = prev.lastStore
+		}
+	}
+	p.mu.Unlock()
 }
 
 func rate(prev, cur uint64, hc bool, dt float64) float64 {
