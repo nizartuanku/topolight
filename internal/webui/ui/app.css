@@ -1,7 +1,7 @@
 /* TopoLight console — HDS-aligned tokens: Ink/Paper/Signal, 8-pt grid, radius 12, five severity colours. No external assets. */
 :root{
   --bg:#F3F5F8;--surface:#FFFFFF;--surface2:#EEF1F5;--surface3:#E4E8EE;--border:#DEE3EA;--text:#111827;--muted:#5B6472;--faint:#5F6875;
-  --accent:#1668B8;--accent-ink:#FFFFFF;--crit:#C62828;--major:#B54200;--minor:#7A4800;--info:#1668B8;--ok:#1B8A5A;--unk:#7C8594;--maint:#6D28D9;
+  --accent:#1668B8;--accent-ink:#FFFFFF;--crit:#C62828;--major:#B54200;--minor:#7A4800;--info:#1668B8;--ok:#12633E;--unk:#555D6A;--maint:#6D28D9;
   --link:#B8C0CC;--grid:#E6EAF0;--shadow:0 1px 2px rgba(17,24,39,.06),0 8px 24px rgba(17,24,39,.06);
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Inter",Roboto,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
