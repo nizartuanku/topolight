@@ -128,7 +128,12 @@ func (d *Discovery) addErr(p *Progress, s string) {
 }
 
 func (d *Discovery) credsFor(site model.Site) []model.Credential {
-	all := d.st.Creds()
+	var all []model.Credential
+	for _, c := range d.st.Creds() {
+		if c.IsSNMP() {
+			all = append(all, c)
+		}
+	}
 	if site.CredID == "" {
 		return all
 	}
@@ -188,6 +193,35 @@ func (d *Discovery) probe(ctx context.Context, site model.Site, ip string, creds
 		d.Register(site.ID, ip, name, descr, oid, cred.ID, "discovery", prog)
 		return
 	}
+	if answered && site.AddPingOnly {
+		d.RegisterPingOnly(site.ID, ip, "", "discovery", prog)
+	}
+}
+
+// RegisterPingOnly adds a device watched with ICMP only. The name comes from
+// reverse DNS when it answers within a second, else the address.
+func (d *Discovery) RegisterPingOnly(siteID, ip, name, source string, prog *Progress) (model.Device, bool) {
+	if dev, exists := d.st.DeviceByIP(ip); exists {
+		return dev, false
+	}
+	if name == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		if names, err := net.DefaultResolver.LookupAddr(ctx, ip); err == nil && len(names) > 0 {
+			name = strings.TrimSuffix(names[0], ".")
+		}
+		cancel()
+	}
+	dev, added := d.Register(siteID, ip, name, "", "", "", source, prog)
+	if !added {
+		return dev, false
+	}
+	dev.PingOnly = true
+	dev.Role = model.RoleServer
+	if source == "discovery" {
+		dev.Notes = strings.TrimSpace(dev.Notes + " Ping-only: answers ICMP, no SNMP credential worked.")
+	}
+	d.st.PutDevice(dev)
+	return dev, true
 }
 
 // Register adds a device (idempotent by IP). It enforces the licence cap: a
