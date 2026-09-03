@@ -14,7 +14,7 @@ build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o topolight ./cmd/topolight
 
 run: build
-	./topolight -data ./.data -listen 127.0.0.1:8432 -syslog-listen :5514 -trap-listen :1162
+	./topolight -data ./.data -listen 127.0.0.1:8433 -syslog-listen :5514 -trap-listen :1162
 
 fmt:
 	gofmt -l -w .
