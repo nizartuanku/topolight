@@ -26,16 +26,34 @@ type Receiver struct {
 	Community string
 	// PollNow lets the receiver ask for an immediate re-poll after a trap.
 	PollNow func(deviceID string)
+	// V3 authenticates SNMPv3 notifications with the saved v3 credentials.
+	V3 *snmp.V3Receiver
+	// Forward, when set, ships raw datagrams to the leader instead of decoding them here
+	// (cluster standby). Informs are still acknowledged locally.
+	Forward func(from string, raw []byte)
 
-	mu       sync.Mutex
-	Received int64
-	Rejected int64
-	last     map[string]time.Time // per (device, oid) rate limit
+	mu         sync.Mutex
+	Received   int64
+	Rejected   int64
+	V3Received int64
+	V3Rejected int64
+	V3LastErr  string
+	last       map[string]time.Time // per (device, oid) rate limit
 }
 
 // New builds a receiver.
 func New(st *store.Store, logs *syslog.LogStore) *Receiver {
-	return &Receiver{st: st, logs: logs, Events: make(chan model.Event, 4096), last: map[string]time.Time{}}
+	r := &Receiver{st: st, logs: logs, Events: make(chan model.Event, 4096), last: map[string]time.Time{}}
+	r.V3 = snmp.NewV3Receiver(func() []snmp.V3User {
+		var out []snmp.V3User
+		for _, c := range st.Creds() {
+			if c.Version == "3" && c.User != "" {
+				out = append(out, snmp.V3User{User: c.User, AuthProto: c.AuthProto, AuthPass: c.AuthPass, PrivProto: c.PrivProto, PrivPass: c.PrivPass})
+			}
+		}
+		return out
+	})
+	return r
 }
 
 // ListenAndServe binds addr (":162") until ctx ends.
@@ -57,7 +75,44 @@ func (r *Receiver) ListenAndServe(ctx context.Context, addr string) error {
 			}
 			continue
 		}
-		t, err := snmp.DecodeTrap(from, append([]byte(nil), buf[:n]...))
+		raw := append([]byte(nil), buf[:n]...)
+		if r.Forward != nil {
+			host, _, _ := net.SplitHostPort(from.String())
+			// acknowledge informs here so the sender stops retrying; the leader decodes the copy
+			if !snmp.IsV3(raw) {
+				if t, err := snmp.DecodeTrap(from, raw); err == nil && t.Inform {
+					if resp := snmp.InformResponse(t.Community, snmp.PDU{RequestID: t.RequestID, VarBinds: t.VarBinds}); resp != nil {
+						pc.WriteTo(resp, from)
+					}
+				}
+			}
+			r.Forward(host, raw)
+			continue
+		}
+		if snmp.IsV3(raw) {
+			t, resp, err := r.V3.Decode(from, raw)
+			if err == snmp.ErrV3Discovery {
+				pc.WriteTo(resp, from)
+				continue
+			}
+			r.mu.Lock()
+			if err != nil {
+				r.V3Rejected++
+				r.V3LastErr = from.String() + ": " + err.Error()
+			} else {
+				r.V3Received++
+			}
+			r.mu.Unlock()
+			if err != nil {
+				continue
+			}
+			if resp != nil {
+				pc.WriteTo(resp, from)
+			}
+			r.Handle(t)
+			continue
+		}
+		t, err := snmp.DecodeTrap(from, raw)
 		if err != nil {
 			r.mu.Lock()
 			r.Rejected++
@@ -74,12 +129,40 @@ func (r *Receiver) ListenAndServe(ctx context.Context, addr string) error {
 	}
 }
 
+// HandleRaw decodes a forwarded datagram (leader side of a cluster).
+func (r *Receiver) HandleRaw(from string, raw []byte) {
+	addr := &net.UDPAddr{IP: net.ParseIP(from), Port: 0}
+	if snmp.IsV3(raw) {
+		t, _, err := r.V3.Decode(addr, raw)
+		r.mu.Lock()
+		if err != nil {
+			r.V3Rejected++
+			r.V3LastErr = from + ": " + err.Error()
+		} else {
+			r.V3Received++
+		}
+		r.mu.Unlock()
+		if err == nil {
+			r.Handle(t)
+		}
+		return
+	}
+	t, err := snmp.DecodeTrap(addr, raw)
+	if err != nil {
+		r.mu.Lock()
+		r.Rejected++
+		r.mu.Unlock()
+		return
+	}
+	r.Handle(t)
+}
+
 // Handle processes one decoded trap.
 func (r *Receiver) Handle(t snmp.Trap) {
 	r.mu.Lock()
 	r.Received++
 	r.mu.Unlock()
-	if r.Community != "" && t.Community != r.Community {
+	if r.Community != "" && t.V3User == "" && t.Community != r.Community {
 		r.mu.Lock()
 		r.Rejected++
 		r.mu.Unlock()
