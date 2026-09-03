@@ -770,7 +770,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	setupDone := len(s.d.Store.Users()) > 0
 	out := map[string]any{
 		"product": version.Product, "version": version.Version, "setup_done": setupDone,
-		"license": map[string]any{"tier": lic.Tier, "notice": lic.Notice, "valid": lic.Valid, "caps": lic.Caps},
+		"license": map[string]any{"tier": lic.Tier, "notice": lic.Notice, "valid": lic.Valid, "caps": lic.Caps, "instance": lic.Instance},
 		"devices": map[string]int{"total": total, "monitored": monitored},
 		"started": s.d.Started, "uptime_s": int(time.Since(s.d.Started).Seconds()),
 	}
