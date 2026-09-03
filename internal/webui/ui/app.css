@@ -203,6 +203,19 @@ pre.snippet{background:var(--surface2);border:1px solid var(--border);border-rad
 .topo-side .close{position:absolute;right:8px;top:8px}
 .tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:12px;box-shadow:var(--shadow);max-width:260px;z-index:5}
 .tip b{display:block}.tip .m{font-family:var(--mono);color:var(--muted);font-size:11px}
+.tip{max-width:400px;min-width:260px}
+/* device health card: shared by the topology hover tip and the side panel */
+.hc-head b{display:block;font-size:13px}.hc-head .m{display:block}
+.hc-grid{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:2px 8px;margin-top:6px;align-items:baseline}
+.hc-grid.tr{grid-template-columns:auto 1fr}
+.hc-list{display:flex;flex-direction:column;gap:1px}
+.hc-sec{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin-top:5px;align-items:baseline}
+.hk{font-family:var(--mono);font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em}
+.hv{font-family:var(--mono);font-size:12px;color:var(--text)}
+.hv.ok{color:var(--ok)}.hv.warn,.warn{color:var(--major)}.hv.bad,.bad{color:var(--crit)}
+.hv .sev.critical,.m .sev.critical{color:var(--crit)}.hv .sev.major,.m .sev.major{color:var(--major)}.hv .sev.minor,.m .sev.minor{color:var(--minor)}
+.hc{padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2,var(--surface));font-size:12px}
+.hc .hc-head{display:none}.hc .m{font-family:var(--mono);color:var(--muted);font-size:11px;margin-top:4px}
 .hint{font-size:11px;color:var(--faint)}
 .tiers{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:11px;color:var(--faint);text-align:right}
 .topo-side ~ .tiers{right:404px}

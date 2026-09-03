@@ -22,6 +22,7 @@
   Element.prototype.append = function (...kids) { return _append.apply(this, kids.flat().filter(k => k !== null && k !== undefined && k !== false)); };
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmtBps = v => { if (!v || v < 0) return '0 b/s'; const u = ['b/s', 'kb/s', 'Mb/s', 'Gb/s', 'Tb/s']; let i = 0; while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; } return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + ' ' + u[i]; };
+  const fmtPps = v => { if (!v || v < 0) return '0 pps'; const u = ['pps', 'kpps', 'Mpps', 'Gpps']; let i = 0; while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; } return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + ' ' + u[i]; };
   const fmtBytes = v => { if (!v) return '0 B'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; } return v.toFixed(i ? 1 : 0) + ' ' + u[i]; };
   const fmtDur = s => { s = Math.max(0, Math.floor(s)); if (s < 60) return s + 's'; if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's'; if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; return Math.floor(s / 86400) + 'd ' + Math.floor(s % 86400 / 3600) + 'h'; };
   const ago = t => { if (!t) return '—'; const d = (Date.now() - new Date(t).getTime()) / 1000; if (d < 0) return 'now'; if (d < 60) return Math.floor(d) + 's ago'; if (d < 3600) return Math.floor(d / 60) + 'm ago'; if (d < 86400) return Math.floor(d / 3600) + 'h ago'; return Math.floor(d / 86400) + 'd ago'; };
@@ -493,6 +494,57 @@
     return el;
   }
 
+  // ---------- device health card (topology hover + side panel) ----------
+  // One small GET per device, cached for a few seconds so orbiting the map
+  // over a cluster of nodes never turns into a request storm.
+  const healthCache = {};
+  const HEALTH_TTL = 5000;
+  async function deviceHealth(id) {
+    const c = healthCache[id];
+    if (c && Date.now() - c.at < HEALTH_TTL) return c.p;
+    const p = get('/api/devices/' + id + '/health');
+    healthCache[id] = { at: Date.now(), p };
+    p.catch(() => { delete healthCache[id]; });
+    return p;
+  }
+  function pct(v) { return v === undefined || v === null ? '—' : (Math.round(v * 10) / 10) + '%'; }
+  function pctClass(v, warn, bad) { return v === undefined || v === null ? '' : v >= bad ? ' bad' : v >= warn ? ' warn' : ' ok'; }
+  // healthCard renders the summary as HTML. Every number here is the last
+  // poll's value straight from the store; nothing is smoothed or estimated.
+  function healthCard(hh, compact) {
+    const t = hh.traffic || {}, s = hh.interfaces || {};
+    const rows = [];
+    const stat = `<span class="sdot ${esc(hh.status)}"></span> ${esc(hh.status)}${hh.cause ? ' · upstream ' + esc(hh.cause) + ' is down' : ''}${hh.open_alerts ? ` · <span class="sev ${esc(hh.worst_severity || '')}">${hh.open_alerts} alert${hh.open_alerts > 1 ? 's' : ''}</span>` : ''}`;
+    rows.push(`<div class="hc-head"><b>${esc(hh.name)}</b><span class="m">${esc(hh.ip || '')}${hh.model || hh.vendor ? ' · ' + esc(hh.model || hh.vendor) : ''} · ${esc(hh.role)}</span><span class="m">${stat}</span></div>`);
+    if (!hh.monitored) rows.push('<div class="m">not monitored (over licence cap or disabled)</div>');
+    const g = [];
+    g.push(`<span class="hk">CPU</span><span class="hv${pctClass(hh.cpu_pct, 70, 85)}">${pct(hh.cpu_pct)}</span>`);
+    g.push(`<span class="hk">Mem</span><span class="hv${pctClass(hh.mem_pct, 80, 90)}">${pct(hh.mem_pct)}</span>`);
+    if (hh.temp_c !== undefined && hh.temp_c !== null) g.push(`<span class="hk">Temp</span><span class="hv${pctClass(hh.temp_c, 60, 70)}">${Math.round(hh.temp_c)} °C</span>`);
+    g.push(`<span class="hk">RTT</span><span class="hv">${hh.rtt_ms === undefined || hh.rtt_ms === null ? '—' : (Math.round(hh.rtt_ms * 10) / 10) + ' ms'}</span>`);
+    g.push(`<span class="hk">Loss</span><span class="hv${pctClass(hh.loss_pct, 5, 20)}">${pct(hh.loss_pct)}</span>`);
+    rows.push(`<div class="hc-grid">${g.join('')}</div>`);
+    const ifl = `${s.up || 0} up · <span class="${s.down ? 'bad' : ''}">${s.down || 0} down</span>${s.admin_down ? ' · ' + s.admin_down + ' shut' : ''} · ${s.total || 0} total${s.important_down ? ` · <span class="bad">${s.important_down} uplink${s.important_down > 1 ? 's' : ''} down</span>` : ''}`;
+    rows.push(`<div class="hc-sec"><span class="hk">Interfaces</span><span class="hv">${ifl}</span></div>`);
+    if (t.have_rates) {
+      const drops = (t.in_drop_ps || 0) + (t.out_drop_ps || 0), errs = (t.in_err_ps || 0) + (t.out_err_ps || 0);
+      rows.push(`<div class="hc-grid tr"><span class="hk">In</span><span class="hv">${fmtBps(t.in_bps)} <span class="faint">·</span> ${fmtPps(t.in_pps)}</span>` +
+        `<span class="hk">Out</span><span class="hv">${fmtBps(t.out_bps)} <span class="faint">·</span> ${fmtPps(t.out_pps)}</span>` +
+        `<span class="hk">Drops</span><span class="hv${drops > 0 ? ' warn' : ''}">${drops > 0 ? drops.toFixed(drops < 10 ? 1 : 0) + ' pkt/s' : '0'}</span>` +
+        `<span class="hk">Errors</span><span class="hv${errs > 0 ? ' warn' : ''}">${errs > 0 ? errs.toFixed(errs < 10 ? 1 : 0) + ' /s' : '0'}</span></div>`);
+    } else {
+      rows.push('<div class="m">rates after the next poll</div>');
+    }
+    if (hh.top_util && hh.top_util.length) {
+      rows.push('<div class="hc-sec"><span class="hk">Busiest</span><span class="hv hc-list">' + hh.top_util.map(i => { const u = Math.max(i.in_util_pct || 0, i.out_util_pct || 0); return `<span><span class="mono">${esc(i.name)}</span> <span class="${u >= 85 ? 'bad' : u >= 60 ? 'warn' : ''}">${u < 1 && u > 0 ? '<1' : Math.round(u)}%</span>${i.drop_ps ? ` <span class="warn">drop ${i.drop_ps.toFixed(1)}/s</span>` : ''}${i.err_ps ? ` <span class="warn">err ${i.err_ps.toFixed(1)}/s</span>` : ''}</span>`; }).join('') + '</span></div>');
+    }
+    if (hh.down && hh.down.length) {
+      rows.push('<div class="hc-sec"><span class="hk bad">Down</span><span class="hv">' + hh.down.map(i => `<span class="mono">${esc(i.name)}</span>${i.important ? '★' : ''}${i.alias && !compact ? ' <span class="faint">' + esc(i.alias) + '</span>' : ''}`).join(', ') + (hh.down_more ? ` <span class="faint">+${hh.down_more} more</span>` : '') + '</span></div>');
+    }
+    if (!compact) rows.push(`<div class="m">polled ${ago(hh.last_poll)} · up ${fmtDur(hh.uptime_s || 0)}</div>`);
+    return rows.join('');
+  }
+
   // ---------- topology ----------
   async function pageTopology(main) {
     main.className = 'main flush';
@@ -513,10 +565,34 @@
       h('div', { class: 'legend' }, leg('up', 'Up'), leg('degraded', 'Degraded'), leg('down', 'Down'), leg('unreachable', 'Unreachable (suppressed)'), leg('maintenance', 'Maintenance'), h('span', { class: 'hint' }, 'drag = orbit · shift-drag = pan · scroll = zoom · double-click = reset')));
     function leg(cls, label) { return h('span', null, h('span', { class: 'sdot ' + cls }), label); }
     main.append(bar, wrap);
-    let side = null;
+    let side = null, sideHealth = null;
+    // hover: the identity line appears at once; the health card follows as
+    // soon as /health answers (debounced so sweeping across nodes is free).
+    let hoverId = null, hoverTimer = null;
+    function placeTip(e) {
+      const r = wrap.getBoundingClientRect();
+      let x = e.clientX - r.left + 14, y = e.clientY - r.top + 14;
+      const tw = tip.offsetWidth || 300, th = tip.offsetHeight || 160;
+      if (x + tw > r.width - 8) x = Math.max(8, e.clientX - r.left - tw - 14);
+      if (y + th > r.height - 8) y = Math.max(8, r.height - th - 8);
+      tip.style.left = x + 'px'; tip.style.top = y + 'px';
+    }
+    function hoverHealth(n) {
+      const id = n.id;
+      deviceHealth(id).then(hh => { if (hoverId !== id) return; tip.innerHTML = healthCard(hh, true); }).catch(() => { });
+    }
     const view = new TopoView(canvas, {
       mode, overlay, showGuess,
-      onHover: (n, e) => { if (!n) { tip.style.display = 'none'; return; } tip.style.display = 'block'; const r = wrap.getBoundingClientRect(); tip.style.left = (e.clientX - r.left + 14) + 'px'; tip.style.top = (e.clientY - r.top + 14) + 'px'; tip.innerHTML = `<b>${esc(n.name)}</b><span class="m">${esc(n.ip || '')} ${esc(n.model || n.vendor || '')}</span><span class="m">${esc(n.status)}${n.cause ? ' · caused by upstream' : ''}${n.alerts ? ' · ' + n.alerts + ' alert(s)' : ''}</span>`; },
+      onHover: (n, e) => {
+        if (!n) { tip.style.display = 'none'; hoverId = null; clearTimeout(hoverTimer); return; }
+        tip.style.display = 'block';
+        if (n.id !== hoverId) {
+          hoverId = n.id; clearTimeout(hoverTimer);
+          tip.innerHTML = `<div class="hc-head"><b>${esc(n.name)}</b><span class="m">${esc(n.ip || '')} ${esc(n.model || n.vendor || '')}</span><span class="m"><span class="sdot ${esc(n.status)}"></span> ${esc(n.status)}${n.cause ? ' · caused by upstream' : ''}${n.alerts ? ' · ' + n.alerts + ' alert(s)' : ''}</span></div>` + (n.external ? '' : '<div class="m">loading health…</div>');
+          if (!n.external) hoverTimer = setTimeout(() => hoverHealth(n), 120);
+        }
+        placeTip(e);
+      },
       onSelect: n => { if (!n || n.external) { if (side) { side.remove(); side = null; } return; } showSide(n.id); }
     });
     const ro = new ResizeObserver(() => view.resize()); ro.observe(wrap);
@@ -531,12 +607,15 @@
       if (side) side.remove();
       const dev = d.device;
       const imp = d.interfaces.filter(i => i.important || i.status === 'down' && i.admin_up).slice(0, 8);
+      const healthBox = h('div', { class: 'hc', style: 'margin:10px 0' }, 'loading health…');
+      sideHealth = () => deviceHealth(dev.id).then(hh => { healthBox.innerHTML = healthCard(hh, false); }).catch(() => { });
+      sideHealth();
       side = h('div', { class: 'topo-side' },
         h('button', { class: 'iconbtn close', onclick: () => { side.remove(); side = null; view.selected = null; } }, '×'),
         h('div', { style: 'display:flex;gap:8px;align-items:center;margin-bottom:6px' }, h('span', { class: 'sdot ' + dev.status }), h('h2', null, dev.name), h('span', { class: 'badge ' + dev.status }, dev.status)),
         h('div', { class: 'muted small' }, `${dev.model || dev.vendor || '—'} · ${dev.ip} · ${dev.role} · up ${fmtDur(dev.uptime_s || 0)}`),
         dev.cause ? h('div', { class: 'small', style: 'color:var(--unk);margin-top:4px' }, 'Unreachable — upstream ' + (d.cause_name || '') + ' is down.') : null,
-        h('div', { class: 'grid c3', style: 'margin:10px 0;gap:8px' }, mini('CPU', dev.metrics && dev.metrics.cpu_pct, '%'), mini('RTT', dev.metrics && dev.metrics.rtt_ms, ' ms'), mini('Loss', dev.metrics && dev.metrics.loss_pct, '%')),
+        healthBox,
         h('div', { style: 'display:flex;gap:6px;margin-bottom:10px' }, h('a', { class: 'btn sm', href: '#/device/' + dev.id }, 'Open device'), h('a', { class: 'btn sm', href: '#/logs/' + dev.id }, 'Logs'), h('button', { class: 'btn sm', onclick: () => post('/api/devices/' + dev.id + '/poll').then(() => toast('Poll queued', 'ok')) }, 'Poll now')),
         h('h3', null, 'Links'), h('table', { class: 'tbl' }, h('tbody', null, ...d.links.map(l => { const other = l.a_device === dev.id ? l.b_device : l.a_device; const lif = l.a_device === dev.id ? l.a_if : l.b_if; const oif = l.a_device === dev.id ? l.b_if : l.a_if; return h('tr', null, h('td', null, h('span', { class: 'sdot ' + (l.status || 'up') }), ' ', h('span', { class: 'mono' }, lif)), h('td', null, '→ ' + (l.external ? l.external_name : d.names[other] || other) + ' ', h('span', { class: 'mono faint' }, oif)), h('td', { class: 'r num small' }, (l.util_pct || 0).toFixed(0) + '%', l.confidence < 0.8 ? h('span', { class: 'faint' }, ' ?') : null)); }))),
         d.alerts.length ? [h('h3', { style: 'margin-top:10px' }, 'Open alerts'), h('div', { class: 'list' }, ...d.alerts.map(a => alertItem(a, {}, () => nav('#/alerts/' + a.id))))] : null,
@@ -549,7 +628,13 @@
       destroy() { view.destroy(); ro.disconnect(); },
       theme() { view._colors(); },
       onChange(type, data) {
-        if (type === 'device') view.updateNode({ id: data.id, name: data.name, status: data.status, role: data.role, cause: data.cause, cpu: data.metrics && data.metrics.cpu_pct, monitored: data.monitored });
+        if (type === 'device') {
+          view.updateNode({ id: data.id, name: data.name, status: data.status, role: data.role, cause: data.cause, cpu: data.metrics && data.metrics.cpu_pct, monitored: data.monitored });
+          delete healthCache[data.id];
+          if (side && sideHealth && view.selected === data.id) sideHealth();
+          if (hoverId === data.id) hoverHealth({ id: data.id });
+        }
+        if (type === 'interface' && data.device_id) { delete healthCache[data.device_id]; }
         if (type === 'link') view.updateLink(data);
         if (type === 'topology') load();
       }
