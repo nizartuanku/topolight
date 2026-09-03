@@ -90,8 +90,8 @@ Caps are enforced honestly: over the limit, discovery still lists the device but
 
 Read these before you rely on it.
 
-- **Topology comes from LLDP/CDP.** Devices that do not speak either (many ISP CPEs, unmanaged switches, most servers) appear only as *external* nodes or via a manual link. ARP/FDB-based endpoint placement is planned, not shipped.
-- **Traps are SNMP v2c only** in this release (v3 traps and syslog over TLS are on the list). Polling supports v3 authPriv (SHA/SHA-256/MD5 + AES-128/DES).
+- **Topology comes from LLDP/CDP.** Devices that do not speak either (many ISP CPEs, unmanaged switches) appear only as *external* nodes or via a manual link. Hosts are placed from ARP/FDB on the Endpoints page, which is switch-port accuracy, not a drawn link.
+- **gNMI is beta and Get-only** — no streaming subscriptions yet. Wireless and SD-WAN come from UniFi, Meraki, Cisco WLC, Aruba controllers and FortiGate; Mist, Aruba Central and Omada are not supported.
 - **Metrics are 60-second resolution** for 7 days (uplinks and device metrics; other ports at 5 minutes from the start), then 5-minute averages/min/max until the retention limit. Flow summaries are bounded top-N buckets (≈2 MB per exporter per day), not raw records.
 - **Logs are a searchable journal, not a SIEM.** Filter by device, severity, text and time window; no correlation rules, no long-term analytics.
 - **ICMP on Linux needs** either `CAP_NET_RAW` or the unprivileged ping group range (`sysctl net.ipv4.ping_group_range`); the installer sets the capability. On other operating systems TopoLight runs in SNMP-only reachability mode and says so on the Overview.
