@@ -83,18 +83,21 @@ type Caps struct {
 func Unlimited(n int) bool { return n == 0 }
 
 // CapsFor returns the caps granted by a tier.
+//
+// Every feature is available in every tier — the tiers differ only in
+// capacity (devices, sites, users) and history. That is deliberate: a Free
+// install must be able to try everything the paid tiers do, on a small network.
 func CapsFor(t Tier) Caps {
+	all := Caps{Telegram: true, Webhook: true, Export: true, Maintenance: true, Roles: true}
 	switch t {
 	case TierTeam:
-		return Caps{Tier: TierTeam, MaxDevices: 1500, MaxSites: 0, RetentionDays: 365, MaxUsers: 0,
-			Telegram: true, Webhook: true, Export: true, Maintenance: true, Roles: true}
+		all.Tier, all.MaxDevices, all.MaxSites, all.RetentionDays, all.MaxUsers = TierTeam, 1500, 0, 365, 0
 	case TierPro:
-		return Caps{Tier: TierPro, MaxDevices: 500, MaxSites: 3, RetentionDays: 183, MaxUsers: 3,
-			Telegram: true, Webhook: true, Export: true, Maintenance: true, Roles: false}
+		all.Tier, all.MaxDevices, all.MaxSites, all.RetentionDays, all.MaxUsers = TierPro, 500, 3, 183, 5
 	default:
-		return Caps{Tier: TierFree, MaxDevices: 25, MaxSites: 1, RetentionDays: 7, MaxUsers: 1,
-			Telegram: false, Webhook: false, Export: false, Maintenance: false, Roles: false}
+		all.Tier, all.MaxDevices, all.MaxSites, all.RetentionDays, all.MaxUsers = TierFree, 25, 1, 7, 3
 	}
+	return all
 }
 
 // State is the resolved licence status of the running binary.
