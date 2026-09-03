@@ -123,9 +123,10 @@ func main() {
 	if key == "" && dir != "" {
 		key = webui.ReadLicenseKey(dir)
 	}
-	lic := license.Resolve(key)
+	instanceID := license.LoadInstanceID(dir)
+	lic := license.Resolve(key, instanceID)
 	licState := &lic
-	log.Printf("%s %s — %s", version.Product, version.Version, lic.Notice)
+	log.Printf("%s %s — %s (instance %s)", version.Product, version.Version, lic.Notice, instanceID)
 
 	st, err := store.Open(dir)
 	if err != nil {
@@ -474,12 +475,16 @@ func main() {
 		Syslog: sys, Trap: tr, Flow: fc, FlowAddr: *flowAddr, SFlowAddr: *sflowAddr, Endpoints: eps, Probes: pr, Backup: bk, Reports: rp, Integ: ig, DataDir: dir, Started: time.Now(), Listen: *listen, SyslogAddr: *syslogAddr, SyslogTLSAddr: *syslogTLS, TrapAddr: *trapAddr, ICMPError: icmpErr,
 		License: func() license.State { return *licState },
 		SetLicense: func(k string) license.State {
-			s := license.Resolve(k)
+			s := license.Resolve(k, license.LoadInstanceID(dir))
 			if s.Valid || k == "" {
+				// Accepted (or cleared): persist and switch. A rejected key
+				// only reports why — the licence in force stays as it was.
 				_ = webui.WriteLicenseKey(dir, k)
+				*licState = s
+				log.Printf("licence updated — %s", s.Notice)
+			} else {
+				log.Printf("licence key rejected — %s", s.Notice)
 			}
-			*licState = s
-			log.Printf("licence updated — %s", s.Notice)
 			return s
 		}})
 	httpSrv := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
