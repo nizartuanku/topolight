@@ -1,8 +1,15 @@
 package syslog
 
 import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"net"
 	"testing"
 	"time"
+
+	"github.com/nizartuanku/topolight/internal/selfcert"
+	"github.com/nizartuanku/topolight/internal/store"
 )
 
 func TestParse(t *testing.T) {
@@ -27,5 +34,65 @@ func TestParse(t *testing.T) {
 	e := Parse("10.0.0.1", "<187>1234567: Sep  2 14:31:06.412 UTC: %LINK-3-UPDOWN: x", recv)
 	if e.TS.Hour() != 14 || e.TS.Minute() != 31 || e.TS.Second() != 6 || e.TS.Year() != 2026 {
 		t.Fatalf("timestamp %v", e.TS)
+	}
+}
+
+func TestFramingAndTLS(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err := OpenLogStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New(st, logs)
+	cert, _, _, err := selfcert.Load(dir, "test", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go r.serveTCP(ctx, ln)
+	defer ln.Close()
+	c, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m1 := "<134>1 2026-09-03T02:00:00Z fw1 - - - - first line\nwith embedded newline"
+	m2 := "<187>Sep  3 02:00:01 sw1 1: %LINK-3-UPDOWN: Interface Gi1/0/1, changed state to down"
+	fmt.Fprintf(c, "%d %s", len(m1), m1) // octet counting, newline inside
+	fmt.Fprintf(c, "%s\n", m2)           // non-transparent
+	fmt.Fprintf(c, "%d %s", len(m2), m2) // octet counting again
+	c.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		r.mu.Lock()
+		n := r.Received
+		r.mu.Unlock()
+		if n == 3 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Received != 3 {
+		t.Fatalf("received %d, want 3", r.Received)
+	}
+	// plain TCP client to the TLS port fails the handshake and is counted
+	p, _ := net.Dial("tcp", ln.Addr().String())
+	p.Write([]byte("<13>not tls\n"))
+	p.Close()
+	r.mu.Unlock()
+	time.Sleep(200 * time.Millisecond)
+	r.mu.Lock()
+	if r.TLSFailed != 1 {
+		t.Fatalf("tls failures %d", r.TLSFailed)
 	}
 }

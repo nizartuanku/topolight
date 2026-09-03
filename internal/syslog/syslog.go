@@ -5,7 +5,9 @@ package syslog
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"regexp"
 	"strconv"
@@ -24,10 +26,14 @@ type Receiver struct {
 	Events chan model.Event
 	// PerSourceRate is the sustained lines/second allowed per source IP.
 	PerSourceRate int
+	// Forward, when set, receives every line instead of the local store (cluster standby).
+	Forward func(host, raw string)
 
 	mu                sync.Mutex
 	buckets           map[string]*bucket
 	Received, Dropped int64
+	TLSFailed         int64 // TLS handshakes that failed
+	TLSLastErr        string
 	unknownHosts      map[string]int64
 }
 
@@ -82,23 +88,77 @@ func (r *Receiver) serveTCP(ctx context.Context, ln net.Listener) {
 			}
 			continue
 		}
-		go func(c net.Conn) {
-			defer c.Close()
-			host, _, _ := net.SplitHostPort(c.RemoteAddr().String())
-			sc := bufio.NewScanner(c)
-			sc.Buffer(make([]byte, 64<<10), 64<<10)
-			for sc.Scan() {
-				line := sc.Text()
-				// RFC 6587 octet counting: "123 <34>..."
-				if i := strings.IndexByte(line, ' '); i > 0 && i < 6 {
-					if _, err := strconv.Atoi(line[:i]); err == nil && strings.HasPrefix(line[i+1:], "<") {
-						line = line[i+1:]
-					}
-				}
-				r.Handle(host, line)
-			}
-		}(conn)
+		go r.serveConn(conn)
 	}
+}
+
+// serveConn reads syslog frames from one stream: RFC 6587/5425 octet
+// counting ("123 <34>…", the length may cover embedded newlines) or
+// newline-delimited (non-transparent framing), decided per message.
+func (r *Receiver) serveConn(c net.Conn) {
+	defer c.Close()
+	host, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+	if tc, ok := c.(*tls.Conn); ok {
+		c.SetDeadline(time.Now().Add(15 * time.Second))
+		if err := tc.Handshake(); err != nil {
+			r.mu.Lock()
+			r.TLSFailed++
+			r.TLSLastErr = host + ": " + err.Error()
+			r.mu.Unlock()
+			return
+		}
+		c.SetDeadline(time.Time{})
+	}
+	br := bufio.NewReaderSize(c, 64<<10)
+	for {
+		b, err := br.Peek(1)
+		if err != nil {
+			return
+		}
+		var line string
+		if b[0] >= '1' && b[0] <= '9' {
+			// octet counting: decimal length, space, message
+			head, err := br.ReadString(' ')
+			if err != nil {
+				return
+			}
+			n, err := strconv.Atoi(strings.TrimSpace(head))
+			if err != nil || n <= 0 || n > 1<<20 {
+				return
+			}
+			buf := make([]byte, n)
+			if _, err := io.ReadFull(br, buf); err != nil {
+				return
+			}
+			line = string(buf)
+		} else {
+			l, err := br.ReadString('\n')
+			if err != nil && l == "" {
+				return
+			}
+			line = strings.TrimRight(l, "\r\n")
+			if err != nil {
+				r.Handle(host, line)
+				return
+			}
+		}
+		r.Handle(host, line)
+	}
+}
+
+// ListenAndServeTLS accepts syslog over TLS (RFC 5425) on addr (":6514").
+// clientCA, when set, requires and verifies client certificates.
+func (r *Receiver) ListenAndServeTLS(ctx context.Context, addr string, cfg *tls.Config) error {
+	ln, err := tls.Listen("tcp", addr, cfg)
+	if err != nil {
+		return err
+	}
+	go func() {
+		<-ctx.Done()
+		ln.Close()
+	}()
+	r.serveTCP(ctx, ln)
+	return nil
 }
 
 func (r *Receiver) allow(host string) bool {
@@ -153,6 +213,10 @@ func (r *Receiver) Handle(host, raw string) {
 		r.mu.Lock()
 		r.Dropped++
 		r.mu.Unlock()
+		return
+	}
+	if r.Forward != nil {
+		r.Forward(host, raw)
 		return
 	}
 	e := Parse(host, raw, time.Now())
