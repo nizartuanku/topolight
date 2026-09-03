@@ -13,7 +13,7 @@ TopoLight watches your switches, routers, firewalls and access points over ICMP 
 ## What you get
 
 - **Discovery** — sweep subnets or ranges (ICMP then SNMP with every credential you saved); LLDP/CDP neighbours are followed automatically; manual add for the odd device.
-- **Health** — ICMP RTT/loss/jitter; SNMP sysUpTime, IF-MIB 64-bit counters (rates, utilisation, errors), HOST-RESOURCES, ENTITY-MIB serial/model; vendor CPU/memory/temperature through built-in profiles (Cisco IOS/NX-OS/ASA, FortiGate, Palo Alto, Juniper, Aruba AOS-S/CX, MikroTik, Huawei, Ubiquiti, net-snmp) plus your own JSON profiles.
+- **Health** — ICMP RTT/loss/jitter; SNMP sysUpTime, IF-MIB 64-bit counters (bit/s, packets/s, utilisation, errors, drops), HOST-RESOURCES, ENTITY-MIB serial/model; vendor CPU/memory/temperature through built-in profiles (Cisco IOS/NX-OS/ASA, FortiGate, Palo Alto, Juniper, Aruba AOS-S/CX, MikroTik, Huawei, Ubiquiti, net-snmp) plus your own JSON profiles.
 - **Topology** — links synthesised from both ends of every LLDP/CDP observation with a confidence score; roles (core / distribution / access) inferred from the graph; a **3D stacked-disc map** rendered on a plain canvas (no WebGL, no JavaScript framework) with a 2D mode, orbit, zoom, status and utilisation overlays, live updates.
 - **Intake** — syslog UDP/TCP (RFC 3164 and 5424, Cisco mnemonics, FortiGate key=value) and SNMP v2c traps/informs; interesting lines become events (link down/up, config change, BGP/OSPF neighbour, HA state, environment, auth failure, log flood).
 - **State engine** — per-device and per-interface state machine with confirmation cycles, hysteresis, flap detection, **topology-aware suppression** (a device behind a dead uplink is *unreachable*, not *down*, and its alert folds under the root cause), site-down collapse, maintenance windows, dedup and re-open.
@@ -87,7 +87,7 @@ Read these before you rely on it.
 - **Logs are a searchable journal, not a SIEM.** Filter by device, severity, text and time window; no correlation rules, no long-term analytics.
 - **ICMP on Linux needs** either `CAP_NET_RAW` or the unprivileged ping group range (`sysctl net.ipv4.ping_group_range`); the installer sets the capability. On other operating systems TopoLight runs in SNMP-only reachability mode and says so on the Overview.
 - **Ports 514 and 162 are privileged.** The installer grants `cap_net_bind_service`; otherwise use `-syslog-listen :5514 -trap-listen :1162` and point devices there.
-- **Sizing** — measured, not guessed: a 1,500-device simulated estate polled every 60 s uses about a quarter of one CPU core and ~110 MB of RAM. History costs ≈4.5 KB per series per day at 60-second resolution and ≈1.8 KB per series per day at 5-minute resolution (worst case; idle ports compress far better) — see [docs/INSTALL.md](docs/INSTALL.md#1-sizing) for what that means for your estate. Remote collectors and HA are v0.2 work.
+- **Sizing** — measured, not guessed: a 1,500-device simulated estate polled every 60 s uses about a quarter of one CPU core and ~110 MB of RAM. History costs ≈4.5 KB per series per day at 60-second resolution and ≈1.8 KB per series per day at 5-minute resolution (worst case; idle ports compress far better) — see [docs/INSTALL.md](docs/INSTALL.md#1-sizing) for what that means for your estate. TopoLight is **one process on one host** (standalone); remote collectors and HA are v0.2 work — see [docs/INSTALL.md §1a](docs/INSTALL.md#1a-deployment-topology-what-the-server-is-and-what-it-is-not) for what that means in practice.
 - **Read-only by design.** TopoLight never pushes configuration to a device.
 
 ## Configuration
@@ -108,6 +108,7 @@ Security notes: the console needs a login from the first request; passwords are 
 
 ## Documentation
 
+- [docs/DATASHEET.md](docs/DATASHEET.md) — protocols collected, features, editions, server requirements, deployment modes, comparison, roadmap ([PDF](docs/TopoLight-0.1-datasheet.pdf))
 - [docs/INSTALL.md](docs/INSTALL.md) — install, upgrade, systemd, Docker, ports, TLS, backups
 - [docs/USER-GUIDE.md](docs/USER-GUIDE.md) — wizard, discovery, topology, alerts, rules, notifications, profiles, licence
 - [docs/SPEC-v0.md](docs/SPEC-v0.md) — scope and architecture of v0.1 ([Bahasa Indonesia](docs/SPEC-v0.ID.md))

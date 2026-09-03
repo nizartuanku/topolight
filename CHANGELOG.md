@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Topology: hovering a node shows a health card — status/cause, CPU, memory, temperature, RTT/loss, interface counts (up/down/shut, uplinks down), aggregate in/out bit/s and packets/s, packet drops and errors per second, the three busiest ports, and the ports that are admin-up but down. The same card sits in the click-through side panel. New endpoint `GET /api/devices/{id}/health` (viewer), computed from the last samples in the store.
+- Polling: IF-MIB unicast packet counters (ifHCIn/OutUcastPkts, 32-bit fallback) and ifIn/OutDiscards are now collected; every interface carries `in_pps`, `out_pps`, `in_drop_rate`, `out_drop_rate` in the API. History: packet rates are stored for important interfaces only, drop series only while drops occur — the documented per-port storage cost is unchanged.
+
 ## 0.1.0 — 2026-09-02
 
 First release.
