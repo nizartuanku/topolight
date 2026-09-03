@@ -51,7 +51,9 @@ type ifCounters struct {
 	ts            time.Time
 	inOct, outOct uint64
 	inErr, outErr uint64
-	hc            bool
+	inPkt, outPkt uint64 // unicast packets (HC when the agent has ifXTable)
+	inDrp, outDrp uint64 // ifInDiscards / ifOutDiscards
+	hc, hcPkt     bool
 	uptime        int64
 	lastStore     time.Time // last time a point was written to the tsdb
 }
@@ -641,6 +643,18 @@ func (p *Poller) pollInterfaces(ctx context.Context, c *snmp.Client, d model.Dev
 	}
 	inErr, _ := col(profile.OIDIfInErrors)
 	outErr, _ := col(profile.OIDIfOutErrors)
+	// packets and discards feed the hover/health summary: unicast packet rate
+	// in each direction and the drop rate (ifInDiscards/ifOutDiscards).
+	inPkt, hcPkt := col(profile.OIDIfHCInUcastPkts)
+	var outPkt map[string]snmp.Value
+	if hcPkt {
+		outPkt, _ = col(profile.OIDIfHCOutUcastPkts)
+	} else {
+		inPkt, _ = col(profile.OIDIfInUcastPkts)
+		outPkt, _ = col(profile.OIDIfOutUcastPkts)
+	}
+	inDrp, _ := col(profile.OIDIfInDiscards)
+	outDrp, _ := col(profile.OIDIfOutDiscards)
 	oper, _ := col(profile.OIDIfOperStatus)
 	admin, _ := col(profile.OIDIfAdminStatus)
 
@@ -651,9 +665,15 @@ func (p *Poller) pollInterfaces(ctx context.Context, c *snmp.Client, d model.Dev
 		if _, ok := oper[idx]; !ok {
 			s.OperUp, s.AdminUp = i.OperUp, i.AdminUp
 		}
-		cur := &ifCounters{ts: now, inOct: uint64(inOct[idx].Uint), outOct: uint64(outOct[idx].Uint), inErr: uint64(inErr[idx].Int), outErr: uint64(outErr[idx].Int), hc: hc, uptime: ds.Uptime}
+		cur := &ifCounters{ts: now, inOct: uint64(inOct[idx].Uint), outOct: uint64(outOct[idx].Uint), inErr: uint64(inErr[idx].Int), outErr: uint64(outErr[idx].Int), hc: hc, uptime: ds.Uptime,
+			inDrp: uint64(inDrp[idx].Int), outDrp: uint64(outDrp[idx].Int), hcPkt: hcPkt}
 		if !hc {
 			cur.inOct, cur.outOct = uint64(inOct[idx].Int), uint64(outOct[idx].Int)
+		}
+		if hcPkt {
+			cur.inPkt, cur.outPkt = uint64(inPkt[idx].Uint), uint64(outPkt[idx].Uint)
+		} else {
+			cur.inPkt, cur.outPkt = uint64(inPkt[idx].Int), uint64(outPkt[idx].Int)
 		}
 		p.mu.Lock()
 		prev := p.counters[i.ID]
@@ -666,6 +686,10 @@ func (p *Poller) pollInterfaces(ctx context.Context, c *snmp.Client, d model.Dev
 				s.OutBps = rate(prev.outOct, cur.outOct, hc, dt) * 8
 				s.InErrRate = rate(prev.inErr, cur.inErr, false, dt)
 				s.OutErrRate = rate(prev.outErr, cur.outErr, false, dt)
+				s.InPps = rate(prev.inPkt, cur.inPkt, hcPkt, dt)
+				s.OutPps = rate(prev.outPkt, cur.outPkt, hcPkt, dt)
+				s.InDropRate = rate(prev.inDrp, cur.inDrp, false, dt)
+				s.OutDropRate = rate(prev.outDrp, cur.outDrp, false, dt)
 				s.HaveRates = true
 				if i.SpeedMbps > 0 {
 					s.InUtil = s.InBps * 100 / (float64(i.SpeedMbps) * 1e6)
@@ -682,6 +706,17 @@ func (p *Poller) pollInterfaces(ctx context.Context, c *snmp.Client, d model.Dev
 					if s.InErrRate > 0 || s.OutErrRate > 0 {
 						p.db.Append("if_in_err|"+i.ID, ts, s.InErrRate)
 						p.db.Append("if_out_err|"+i.ID, ts, s.OutErrRate)
+					}
+					// drops behave like errors: a series only exists while they happen.
+					if s.InDropRate > 0 || s.OutDropRate > 0 {
+						p.db.Append("if_in_drop|"+i.ID, ts, s.InDropRate)
+						p.db.Append("if_out_drop|"+i.ID, ts, s.OutDropRate)
+					}
+					// packet rates are kept for important interfaces only, so the
+					// documented per-port storage cost is unchanged for the rest.
+					if i.Important {
+						p.db.Append("if_in_pps|"+i.ID, ts, s.InPps)
+						p.db.Append("if_out_pps|"+i.ID, ts, s.OutPps)
 					}
 					p.mu.Lock()
 					if c := p.counters[i.ID]; c != nil {
