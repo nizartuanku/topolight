@@ -295,9 +295,21 @@ func (d *Dispatcher) renderTelegram(send []model.Alert) string {
 }
 
 func (d *Dispatcher) sendMail(to []string, subj, body string) error {
+	return d.sendMailType(to, subj, body, "text/plain")
+}
+
+// SendHTML mails an HTML document (reports).
+func (d *Dispatcher) SendHTML(to []string, subj, html string) error {
+	if d.SMTP.Host == "" {
+		return fmt.Errorf("SMTP not configured (-smtp-host)")
+	}
+	return d.sendMailType(to, subj, html, "text/html")
+}
+
+func (d *Dispatcher) sendMailType(to []string, subj, body, ctype string) error {
 	addr := net.JoinHostPort(d.SMTP.Host, fmt.Sprint(portOr(d.SMTP.Port, 587)))
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nDate: %s\r\n\r\n%s",
-		d.SMTP.From, strings.Join(to, ", "), subj, time.Now().Format(time.RFC1123Z), body)
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: %s; charset=UTF-8\r\nDate: %s\r\n\r\n%s",
+		d.SMTP.From, strings.Join(to, ", "), subj, ctype, time.Now().Format(time.RFC1123Z), body)
 	c, err := smtp.Dial(addr)
 	if err != nil {
 		return err
