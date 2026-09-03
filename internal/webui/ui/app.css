@@ -224,3 +224,13 @@ pre.snippet{background:var(--surface2);border:1px solid var(--border);border-rad
 .star{color:var(--faint);cursor:pointer}.star.on{color:var(--minor)}
 @media (prefers-reduced-motion: reduce){.dot.pulse,.toast,.found div{animation:none}}
 @media (max-width:1000px){.app{grid-template-columns:64px 1fr}.nav span,.brand div,.side .foot{display:none}.split{grid-template-columns:1fr}.grid.c4,.grid.c3{grid-template-columns:repeat(2,1fr)}.topo-side{width:min(380px,calc(100% - 24px))}.top .kpi .l{display:none}}
+.tbl tr.grp td{background:var(--surface2);border-top:2px solid var(--border);padding-top:8px}
+.tbl tr.row.on td{background:var(--surface2)}
+pre.snippet.cfg{max-height:70vh;overflow:auto;font-size:12px;line-height:1.35}
+.diff{font-family:var(--mono);font-size:12px;line-height:1.4;max-height:70vh;overflow:auto;padding:6px 0}
+.diff .dl{display:grid;grid-template-columns:48px 48px 16px 1fr;white-space:pre;padding:0 10px}
+.diff .dl .ln{color:var(--faint);text-align:right;padding-right:8px;user-select:none}
+.diff .dl .mk{color:var(--faint);user-select:none}
+.diff .dl.add{background:color-mix(in srgb,var(--ok) 12%,transparent)}.diff .dl.add .mk{color:var(--ok)}
+.diff .dl.del{background:color-mix(in srgb,var(--major) 12%,transparent)}.diff .dl.del .mk{color:var(--major)}
+.diff .hunk{color:var(--faint);padding:4px 16px;border-top:1px dashed var(--border);border-bottom:1px dashed var(--border);margin:4px 0}
