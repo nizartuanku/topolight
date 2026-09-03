@@ -43,6 +43,9 @@ type Client struct {
 	AuthPass  string
 	PrivProto string // "" | des | aes
 	PrivPass  string
+	// ContextName selects an SNMPv3 context (e.g. "vlan-10" on Cisco IOS for
+	// the per-VLAN bridge tables). Empty is the default context.
+	ContextName string
 
 	Timeout time.Duration
 	Retries int
@@ -58,6 +61,8 @@ type Client struct {
 	authKey  []byte
 	privKey  []byte
 	salt     uint64
+	// ctxEngineID overrides the scoped-PDU context engine (inform responses)
+	ctxEngineID []byte
 }
 
 // Errors.
@@ -499,27 +504,34 @@ func (c *Client) curTime() int32 {
 
 // sendV3 builds, signs, encrypts and sends one request; it also absorbs
 // time-window reports by resynchronising.
-func (c *Client) sendV3(pdu PDU, allowResync bool) (PDU, error) {
-	msgID := c.nextReqID()
-	scoped := encodeSequence(encodeOctets(c.engineID), encodeOctets(nil), mustPDU(pdu))
-	flags := c.flags()
+// buildV3 encodes one authenticated/encrypted v3 message for the client's
+// current engine parameters.
+func (c *Client) buildV3(msgID int32, flags byte, pdu PDU) ([]byte, error) {
+	ctxEngine := c.engineID
+	if c.ctxEngineID != nil {
+		ctxEngine = c.ctxEngineID // responses echo the requester's context engine
+	}
+	scoped := encodeSequence(encodeOctets(ctxEngine), encodeOctets([]byte(c.ContextName)), mustPDU(pdu))
 	var privParams []byte
 	var payload []byte
 	if flags&0x02 != 0 {
 		enc, salt, err := c.encrypt(scoped)
 		if err != nil {
-			return PDU{}, err
+			return nil, err
 		}
 		privParams = salt
 		payload = encodeOctets(enc)
 	} else {
 		payload = scoped
 	}
-	authLen := c.authLen()
+	authLen := 0
+	if flags&0x01 != 0 {
+		authLen = c.authLen()
+	}
 	placeholder := make([]byte, authLen)
 	if authLen > 0 {
 		if _, err := rand.Read(placeholder); err != nil {
-			return PDU{}, err
+			return nil, err
 		}
 	}
 	usm := encodeSequence(encodeOctets(c.engineID), encodeInt(tagInteger, int64(c.boots)), encodeInt(tagInteger, int64(c.curTime())),
@@ -528,13 +540,23 @@ func (c *Client) sendV3(pdu PDU, allowResync bool) (PDU, error) {
 	if authLen > 0 {
 		idx := bytes.Index(msg, placeholder)
 		if idx < 0 {
-			return PDU{}, errors.New("snmp: internal auth placeholder")
+			return nil, errors.New("snmp: internal auth placeholder")
 		}
 		for i := 0; i < authLen; i++ {
 			msg[idx+i] = 0
 		}
 		mac := c.mac(msg)
 		copy(msg[idx:], mac[:authLen])
+	}
+	return msg, nil
+}
+
+func (c *Client) sendV3(pdu PDU, allowResync bool) (PDU, error) {
+	msgID := c.nextReqID()
+	authLen := c.authLen()
+	msg, err := c.buildV3(msgID, c.flags(), pdu)
+	if err != nil {
+		return PDU{}, err
 	}
 	raw, err := c.roundTrip(msg, func(b []byte) (bool, error) {
 		m, err := parseV3(b)
@@ -791,21 +813,30 @@ func parseV3(b []byte) (v3msg, error) {
 }
 
 func parseScoped(b []byte) (PDU, error) {
+	p, _, _, err := parseScopedFull(b)
+	return p, err
+}
+
+// parseScopedFull also returns the context engine id and name.
+func parseScopedFull(b []byte) (PDU, []byte, string, error) {
 	r := &reader{b: b}
 	tag, seq, err := r.tlv()
 	if err != nil || tag != tagSequence {
-		return PDU{}, errors.New("snmp: scoped pdu")
+		return PDU{}, nil, "", errors.New("snmp: scoped pdu")
 	}
 	rr := &reader{b: seq}
-	if t, _, err := rr.tlv(); err != nil || t != tagOctetString {
-		return PDU{}, errors.New("snmp: context engine")
+	t, eng, err := rr.tlv()
+	if err != nil || t != tagOctetString {
+		return PDU{}, nil, "", errors.New("snmp: context engine")
 	}
-	if t, _, err := rr.tlv(); err != nil || t != tagOctetString {
-		return PDU{}, errors.New("snmp: context name")
+	t, name, err := rr.tlv()
+	if err != nil || t != tagOctetString {
+		return PDU{}, nil, "", errors.New("snmp: context name")
 	}
 	t, c, err := rr.tlv()
 	if err != nil {
-		return PDU{}, err
+		return PDU{}, nil, "", err
 	}
-	return DecodePDU(t, c)
+	p, err := DecodePDU(t, c)
+	return p, append([]byte(nil), eng...), string(name), err
 }
