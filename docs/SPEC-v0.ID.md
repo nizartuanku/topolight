@@ -2,6 +2,8 @@
 
 *2 Sep 2026 · lini Hexward · product id `topolight` · port 8432 · lingkup v0.1.0*
 
+> **Dokumen historis.** Ini spec build awal (lingkup v0.1.0, port konsol 8432, harga peluncuran). Disimpan sebagai catatan dan **bukan** kondisi terkini. Untuk kemampuan dan harga TopoLight sekarang, lihat [docs/DATASHEET.md](DATASHEET.md) dan [CHANGELOG.md](../CHANGELOG.md).
+
 ## Satu kalimat
 
 Pemantauan jaringan self-hosted untuk 25–1.500 perangkat: discovery, kesehatan SNMP/ICMP, peta topologi LLDP hidup (2D dan 3D), penerimaan syslog dan trap, alerting berbasis state dengan penekanan root-cause — satu biner Go statis yang hanya memakai pustaka standar, tanpa server database, tanpa agen, tanpa telemetri.

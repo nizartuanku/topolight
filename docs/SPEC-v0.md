@@ -2,6 +2,9 @@
 
 *2 Sep 2026 · Hexward line · product id `topolight` · port 8432 · v0.1.0 scope*
 
+> **Historical document.** This is the original build spec (v0.1.0 scope, console port 8432, launch pricing). It is kept for the record and is *not* current. For what TopoLight does and costs today, see [docs/DATASHEET.md](DATASHEET.md) and [CHANGELOG.md](../CHANGELOG.md).
+
+
 ## One sentence
 
 Self-hosted network monitoring for 25–1,500 devices: discovery, SNMP/ICMP health, live LLDP topology map (2D and 3D), syslog and trap intake, state-based alerting with root-cause suppression — one static Go binary built on the standard library alone, no database server, no agent, no telemetry.

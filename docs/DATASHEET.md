@@ -64,7 +64,7 @@ Self-hosted network monitoring with a live LLDP/CDP topology map. One static bin
 | Metric and log retention | 7 days | 6 months | 12 months |
 | Users | 3 | 5 | unlimited |
 | Everything in §1–2, plus Telegram and signed webhook, maintenance windows, admin / operator / viewer roles, JSON export API | ✓ | ✓ | ✓ |
-| Price | $0 (GitHub) | $49 / month | $149 / month |
+| Price | $0 (GitHub) | $99 / month | $249 / month |
 
 One binary for all three and no feature gating — tiers differ only in capacity and history; an offline Ed25519 licence key raises the caps. Keys are issued for the installation's **Instance ID** (Admin → Licence; a cluster shares one) and are refused elsewhere. Over the cap, the newest devices are marked *not monitored* and the API answers `402` with a readable message — nothing breaks, nothing is deleted. A missing, expired or foreign-instance key runs as Free.
 
@@ -114,7 +114,7 @@ Stated as differences, not verdicts — each of these tools is good at things To
 | Topology | Drawn from LLDP/CDP with confidence scores; roles inferred; 3D/2D live map | Discovery-based maps and plugins | Manual/network maps, discovery rules | Auto-discovery, sensor tree, maps |
 | Root-cause handling | Graph-based suppression built into the state engine (unreachable ≠ down) | Dependency-based parent/child | Trigger dependencies, configured per trigger | Sensor dependencies |
 | Traffic data | SNMP/gNMI counters (bps, pps, drops, errors), NetFlow/IPFIX/sFlow top-N | SNMP + NetFlow/sFlow via plugins | SNMP + collectors | SNMP, flow, packet sniffer sensors |
-| Pricing model | Per instance: 25 devices free, $49 (500), $149 (1,500); offline key | Free (GPL) | Free (AGPL) + paid support | Per sensor |
+| Pricing model | Per instance: 25 devices free, $99 (500), $249 (1,500); offline key | Free (GPL) | Free (AGPL) + paid support | Per sensor |
 | Breadth | Network devices only, on purpose | Very broad | Very broad (servers, apps, cloud) | Very broad |
 
 ## 6. Not yet — public roadmap
