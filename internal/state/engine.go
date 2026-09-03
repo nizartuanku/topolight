@@ -267,7 +267,7 @@ func (e *Engine) onDevice(s model.DeviceSample) {
 		check("device_temp_high", s.TempC, s.TempC > -1000)
 	}
 	// SNMP unreachable while ICMP fine
-	if s.Reachable && !s.SNMPOK {
+	if s.Reachable && !s.SNMPOK && !d.PingOnly {
 		o.metricRuns["snmp_unreachable"]++
 		if r, ok := e.rule("snmp_unreachable"); ok && o.metricRuns["snmp_unreachable"] >= max1(r.ForCycles) && !o.metricOn["snmp_unreachable"] {
 			o.metricOn["snmp_unreachable"] = true
@@ -743,6 +743,8 @@ func (e *Engine) onEvent(ev model.Event) {
 		} else {
 			e.addEvidence("interface_down:"+i.ID, ev.Source, now)
 		}
+	case "probe_ok", "tls_ok", "config_backup_ok", "lag_member_up", "sdwan_link_up", "integration_ok":
+		e.resolveAlert(ev.DedupKey, now, ev.Message)
 	case "bgp_neighbor_up", "ospf_adjacency_up":
 		if ev.Kind == "bgp_neighbor_up" {
 			e.resolveAlert(ev.DedupKey, now, ev.Message)
