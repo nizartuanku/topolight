@@ -186,6 +186,10 @@ type Interface struct {
 	OutUtil     float64   `json:"out_util_pct"`
 	InErrRate   float64   `json:"in_err_rate"` // errors per second
 	OutErrRate  float64   `json:"out_err_rate"`
+	InPps       float64   `json:"in_pps"` // unicast packets per second
+	OutPps      float64   `json:"out_pps"`
+	InDropRate  float64   `json:"in_drop_rate"` // ifInDiscards per second
+	OutDropRate float64   `json:"out_drop_rate"`
 	LastChange  time.Time `json:"last_change,omitempty"`
 }
 
@@ -423,21 +427,25 @@ type DeviceSample struct {
 
 // InterfaceSample is one interface's condition after a poll cycle.
 type InterfaceSample struct {
-	IfID       string
-	DeviceID   string
-	Name       string
-	TS         time.Time
-	OperUp     bool
-	AdminUp    bool
-	Important  bool
-	SpeedMbps  int64
-	InBps      float64
-	OutBps     float64
-	InUtil     float64
-	OutUtil    float64
-	InErrRate  float64
-	OutErrRate float64
-	HaveRates  bool
+	IfID        string
+	DeviceID    string
+	Name        string
+	TS          time.Time
+	OperUp      bool
+	AdminUp     bool
+	Important   bool
+	SpeedMbps   int64
+	InBps       float64
+	OutBps      float64
+	InUtil      float64
+	OutUtil     float64
+	InErrRate   float64
+	OutErrRate  float64
+	InPps       float64
+	OutPps      float64
+	InDropRate  float64
+	OutDropRate float64
+	HaveRates   bool
 }
 
 // LogEntry is one syslog line or trap, normalised for storage and search.
