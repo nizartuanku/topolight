@@ -4,7 +4,11 @@ package webui
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"embed"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,12 +24,19 @@ import (
 	"time"
 
 	"github.com/nizartuanku/topolight/internal/auth"
+	"github.com/nizartuanku/topolight/internal/backup"
 	"github.com/nizartuanku/topolight/internal/discovery"
+	"github.com/nizartuanku/topolight/internal/endpoint"
+	"github.com/nizartuanku/topolight/internal/flow"
+	"github.com/nizartuanku/topolight/internal/gnmi"
+	"github.com/nizartuanku/topolight/internal/integ"
 	"github.com/nizartuanku/topolight/internal/license"
 	"github.com/nizartuanku/topolight/internal/model"
 	"github.com/nizartuanku/topolight/internal/notify"
 	"github.com/nizartuanku/topolight/internal/poller"
+	"github.com/nizartuanku/topolight/internal/probe"
 	"github.com/nizartuanku/topolight/internal/profile"
+	"github.com/nizartuanku/topolight/internal/report"
 	"github.com/nizartuanku/topolight/internal/state"
 	"github.com/nizartuanku/topolight/internal/store"
 	"github.com/nizartuanku/topolight/internal/syslog"
@@ -51,6 +62,15 @@ type Deps struct {
 	Profiles             *profile.Library
 	Syslog               *syslog.Receiver
 	Trap                 *trap.Receiver
+	Flow                 *flow.Collector
+	Endpoints            *endpoint.Store
+	Probes               *probe.Runner
+	Backup               *backup.Runner
+	Reports              *report.Runner
+	Integ                *integ.Runner
+	Cluster              *ClusterCtl
+	FlowAddr, SFlowAddr  string
+	SyslogTLSAddr        string
 	License              func() license.State
 	SetLicense           func(key string) license.State
 	DataDir              string
@@ -114,11 +134,29 @@ func readJSON(r *http.Request, v any) error {
 }
 
 func (s *Server) session(r *http.Request) (auth.Session, bool) {
+	if a := r.Header.Get("Authorization"); strings.HasPrefix(a, "Bearer ") {
+		return s.tokenSession(strings.TrimSpace(strings.TrimPrefix(a, "Bearer ")))
+	}
 	c, err := r.Cookie("topolight_session")
 	if err != nil {
 		return auth.Session{}, false
 	}
 	return s.sessions.Get(c.Value)
+}
+
+// tokenSession turns a bearer API token into a session-shaped identity.
+// Tokens are not subject to the same-origin check (no browser is involved).
+func (s *Server) tokenSession(secret string) (auth.Session, bool) {
+	if !strings.HasPrefix(secret, "tl_") || len(secret) < 20 {
+		return auth.Session{}, false
+	}
+	sum := sha256.Sum256([]byte(secret))
+	t, ok := s.d.Store.TokenByHash(hex.EncodeToString(sum[:]))
+	if !ok {
+		return auth.Session{}, false
+	}
+	s.d.Store.TouchToken(t.ID, time.Now())
+	return auth.Session{Token: "api:" + t.ID, UserID: "token:" + t.ID, Name: "token " + t.Name, Role: t.Role, Expires: time.Now().Add(time.Minute), Created: t.Created}, true
 }
 
 // require wraps a handler with authentication and a minimum role.
@@ -137,7 +175,7 @@ func (s *Server) require(role string, h func(http.ResponseWriter, *http.Request,
 			fail(w, http.StatusForbidden, "your role ("+sess.Role+") cannot do this")
 			return
 		}
-		if r.Method != "GET" && r.Method != "HEAD" {
+		if r.Method != "GET" && r.Method != "HEAD" && !strings.HasPrefix(sess.Token, "api:") {
 			// same-origin check for state-changing requests
 			if o := r.Header.Get("Origin"); o != "" {
 				if u, err := parseOrigin(o); err != nil || !strings.EqualFold(u, r.Host) {
@@ -260,6 +298,9 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/creds/{id}", s.require("admin", s.putCred))
 	m.HandleFunc("DELETE /api/creds/{id}", s.require("admin", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
 		s.d.Store.DeleteCred(r.PathValue("id"))
+		if s.d.Trap != nil {
+			s.d.Trap.V3.Forget()
+		}
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	}))
 	m.HandleFunc("POST /api/creds/{id}/test", s.require("operator", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
@@ -275,10 +316,40 @@ func (s *Server) routes() {
 			fail(w, 404, "credential not found")
 			return
 		}
+		start := time.Now()
+		if cred.IsGNMI() {
+			g := poller.GNMIClient(in.IP, cred)
+			g.Timeout = 5 * time.Second
+			defer g.Close()
+			ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+			defer cancel()
+			caps, err := g.Capabilities(ctx)
+			if err != nil {
+				writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error(), "ms": time.Since(start).Milliseconds()})
+				return
+			}
+			host, vendor := "", ""
+			if ups, err := g.Get(ctx, []string{"/system/state"}, 2, gnmi.EncJSONIETF); err == nil {
+				t := gnmi.Tree(ups)
+				host = gnmi.Str(gnmi.Lookup(t, "/system/state/hostname"))
+			}
+			models := make([]string, 0, len(caps.Models))
+			for _, m := range caps.Models {
+				models = append(models, m.Name)
+				if vendor == "" && m.Organization != "" && !strings.Contains(strings.ToLower(m.Organization), "openconfig") && !strings.Contains(strings.ToLower(m.Organization), "ietf") {
+					vendor = m.Organization
+				}
+			}
+			writeJSON(w, 200, map[string]any{"ok": true, "sys_name": host, "sys_descr": fmt.Sprintf("gNMI %s · %d models (%s%s)", caps.Version, len(models), strings.Join(models[:min(4, len(models))], ", "), map[bool]string{true: ", …", false: ""}[len(models) > 4]), "profile": "gnmi", "vendor": vendor, "ms": time.Since(start).Milliseconds()})
+			return
+		}
+		if cred.IsSSH() {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "SSH credentials are exercised by the configuration backup, not by this test", "ms": 0})
+			return
+		}
 		c := poller.NewClient(in.IP, cred)
 		c.Timeout = 2 * time.Second
 		defer c.Close()
-		start := time.Now()
 		vbs, err := c.Get(profile.OIDSysName, profile.OIDSysDescr, profile.OIDSysObjectID)
 		if err != nil {
 			writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error(), "ms": time.Since(start).Milliseconds()})
@@ -293,11 +364,117 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/devices", s.require("operator", s.addDevice))
 	m.HandleFunc("GET /api/devices/{id}", s.require("viewer", s.getDevice))
 	m.HandleFunc("GET /api/devices/{id}/health", s.require("viewer", s.getDeviceHealth))
+	m.HandleFunc("GET /api/flow", s.require("viewer", s.flowWindow))
+	m.HandleFunc("GET /api/flow/exporters", s.require("viewer", s.flowExporters))
+	m.HandleFunc("GET /api/flow/series", s.require("viewer", s.flowSeries))
+	m.HandleFunc("GET /api/probes", s.require("viewer", s.listProbes))
+	m.HandleFunc("POST /api/probes", s.require("operator", s.putProbe))
+	m.HandleFunc("GET /api/probes/{id}", s.require("viewer", s.getProbe))
+	m.HandleFunc("PUT /api/probes/{id}", s.require("operator", s.putProbe))
+	m.HandleFunc("DELETE /api/probes/{id}", s.require("operator", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		id := r.PathValue("id")
+		s.d.Store.DeleteProbe(id)
+		if s.d.Probes != nil {
+			s.d.Probes.Forget(id)
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	}))
+	m.HandleFunc("POST /api/probes/{id}/run", s.require("operator", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		p, err := s.d.Store.Probe(r.PathValue("id"))
+		if err != nil {
+			fail(w, 404, "probe not found")
+			return
+		}
+		writeJSON(w, 200, s.d.Probes.RunOnce(r.Context(), p))
+	}))
+	m.HandleFunc("GET /api/devices/{id}/routing", s.require("viewer", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		id := r.PathValue("id")
+		if _, err := s.d.Store.Device(id); err != nil {
+			fail(w, 404, "device not found")
+			return
+		}
+		rt, ok := s.d.Store.Routing(id)
+		writeJSON(w, 200, map[string]any{"routing": rt, "has": ok})
+	}))
+	m.HandleFunc("GET /api/routing", s.require("viewer", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		// estate-wide protocol summary: peers down, roots, VLAN count
+		all := s.d.Store.AllRouting()
+		names := map[string]string{}
+		for _, d := range s.d.Store.Devices() {
+			names[d.ID] = d.Name
+		}
+		writeJSON(w, 200, map[string]any{"routing": all, "names": names})
+	}))
+	m.HandleFunc("GET /api/devices/{id}/configs", s.require("viewer", s.deviceConfigs))
+	m.HandleFunc("GET /api/devices/{id}/configs/{ver}", s.require("viewer", s.deviceConfig))
+	m.HandleFunc("GET /api/devices/{id}/configs/{ver}/diff/{other}", s.require("viewer", s.deviceConfigDiff))
+	m.HandleFunc("POST /api/devices/{id}/backup", s.require("operator", s.backupNow))
+	m.HandleFunc("GET /api/configs", s.require("viewer", s.configOverview))
+	m.HandleFunc("GET /api/reports", s.require("viewer", s.listReports))
+	m.HandleFunc("POST /api/reports", s.require("operator", s.putReport))
+	m.HandleFunc("PUT /api/reports/{id}", s.require("operator", s.putReport))
+	m.HandleFunc("DELETE /api/reports/{id}", s.require("operator", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		s.d.Store.DeleteReport(r.PathValue("id"))
+		writeJSON(w, 200, map[string]any{"ok": true})
+	}))
+	m.HandleFunc("POST /api/reports/{id}/run", s.require("operator", s.runReport))
+	m.HandleFunc("GET /api/reports/preview", s.require("viewer", s.previewReport))
+	m.HandleFunc("GET /api/reports/files/{file}", s.require("viewer", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		b, err := s.d.Reports.Read(r.PathValue("file"))
+		if err != nil {
+			fail(w, 404, "report not found")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(b)
+	}))
+	m.HandleFunc("GET /api/integrations", s.require("admin", s.listIntegrations))
+	m.HandleFunc("POST /api/integrations", s.require("admin", s.putIntegration))
+	m.HandleFunc("PUT /api/integrations/{id}", s.require("admin", s.putIntegration))
+	m.HandleFunc("DELETE /api/integrations/{id}", s.require("admin", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		s.d.Store.DeleteIntegration(r.PathValue("id"))
+		if s.d.Integ != nil {
+			s.d.Integ.Forget(r.PathValue("id"))
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	}))
+	m.HandleFunc("POST /api/integrations/{id}/test", s.require("admin", s.testIntegration))
+	m.HandleFunc("POST /api/integrations/{id}/run", s.require("operator", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		if s.d.Integ != nil {
+			s.d.Integ.Now(r.PathValue("id"))
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	}))
+	m.HandleFunc("GET /api/wireless", s.require("viewer", s.wirelessOverview))
+	m.HandleFunc("GET /api/sdwan", s.require("viewer", s.sdwanOverview))
+	m.HandleFunc("GET /api/devices/{id}/wireless", s.require("viewer", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		ws, ok := s.d.Store.Wireless(r.PathValue("id"))
+		writeJSON(w, 200, map[string]any{"wireless": ws, "has": ok, "sdwan": s.d.Store.SDWAN(r.PathValue("id"))})
+	}))
+	m.HandleFunc("GET /api/cluster", s.require("viewer", s.clusterStatus))
+	m.HandleFunc("POST /api/cluster/enable", s.require("admin", s.clusterEnable))
+	m.HandleFunc("POST /api/cluster/token", s.require("admin", s.clusterToken))
+	m.HandleFunc("POST /api/cluster/members", s.require("admin", s.clusterMembers))
+	m.HandleFunc("GET /api/cluster/peer/{id}", s.require("admin", s.clusterPeer))
+	m.HandleFunc("GET /api/endpoints", s.require("viewer", s.listEndpoints))
+	m.HandleFunc("GET /api/endpoints/{mac}", s.require("viewer", s.getEndpoint))
+	m.HandleFunc("GET /api/devices/{id}/endpoints", s.require("viewer", s.deviceEndpoints))
 	m.HandleFunc("PUT /api/devices/{id}", s.require("operator", s.updateDevice))
 	m.HandleFunc("DELETE /api/devices/{id}", s.require("admin", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
 		id := r.PathValue("id")
 		s.d.Store.DeleteDevice(id)
 		s.d.Poller.Forget(id)
+		if s.d.Backup != nil {
+			s.d.Backup.Forget(id)
+		}
+		if s.d.Probes != nil {
+			for _, p := range s.d.Store.Probes() {
+				if p.DeviceID == id {
+					p.DeviceID = ""
+					s.d.Store.PutProbe(p)
+				}
+			}
+		}
 		s.d.Engine.InvalidateTopology()
 		s.d.Topology.Rebuild()
 		writeJSON(w, 200, map[string]bool{"ok": true})
@@ -477,6 +654,12 @@ func (s *Server) routes() {
 		writeJSON(w, 200, out)
 	}))
 	m.HandleFunc("POST /api/users", s.require("admin", s.addUser))
+	m.HandleFunc("GET /api/tokens", s.require("admin", s.listTokens))
+	m.HandleFunc("POST /api/tokens", s.require("admin", s.addToken))
+	m.HandleFunc("DELETE /api/tokens/{id}", s.require("admin", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+		s.d.Store.DeleteToken(r.PathValue("id"))
+		writeJSON(w, 200, map[string]any{"ok": true})
+	}))
 	m.HandleFunc("DELETE /api/users/{id}", s.require("admin", func(w http.ResponseWriter, r *http.Request, sess auth.Session) {
 		id := r.PathValue("id")
 		if id == sess.UserID {
@@ -537,6 +720,9 @@ func (s *Server) routes() {
 			cur.DefaultPoll = in.DefaultPoll
 		}
 		cur.DiscoveryEvery = in.DiscoveryEvery
+		if in.BackupEveryHours >= -1 && in.BackupEveryHours <= 24*30 {
+			cur.BackupEveryHours = in.BackupEveryHours
+		}
 		if in.TopologyEvery >= 5 {
 			cur.TopologyEvery = in.TopologyEvery
 		}
@@ -617,10 +803,21 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		out["collectors"] = map[string]any{
 			"poll_cycles": s.d.Poller.Cycles, "poll_failures": s.d.Poller.Failures,
 			"syslog_received": s.d.Syslog.Received, "syslog_dropped": s.d.Syslog.Dropped, "syslog_unknown_hosts": s.d.Syslog.UnknownHosts(),
-			"trap_received": s.d.Trap.Received, "trap_rejected": s.d.Trap.Rejected,
+			"trap_received": s.d.Trap.Received, "trap_rejected": s.d.Trap.Rejected, "trap_v3_received": s.d.Trap.V3Received, "trap_v3_rejected": s.d.Trap.V3Rejected, "trap_v3_last_error": s.d.Trap.V3LastErr, "trap_engine_id": s.d.Store.Settings().EngineID,
 			"series": s.d.DB.SeriesCount(), "tsdb_bytes": s.d.DB.DiskUsage(), "logs_count": s.d.Logs.Count,
-			"syslog_addr": s.d.SyslogAddr, "trap_addr": s.d.TrapAddr, "icmp": s.d.ICMPError == "", "icmp_error": s.d.ICMPError,
+			"syslog_addr": s.d.SyslogAddr, "syslog_tls_addr": s.d.SyslogTLSAddr, "syslog_tls_failed": s.d.Syslog.TLSFailed, "syslog_tls_last_error": s.d.Syslog.TLSLastErr, "trap_addr": s.d.TrapAddr, "icmp": s.d.ICMPError == "", "icmp_error": s.d.ICMPError,
 			"notify_sent": s.d.Notify.Sent, "notify_failed": s.d.Notify.Failed,
+			"flow_addr": s.d.FlowAddr, "sflow_addr": s.d.SFlowAddr,
+		}
+		if s.d.Flow != nil {
+			out["flow"] = s.d.Flow.Stats()
+		}
+		if s.d.Backup != nil {
+			out["backup"] = s.d.Backup.Stats()
+		}
+		if s.d.Endpoints != nil {
+			out["endpoints"] = s.d.Endpoints.Stats(time.Now())
+			out["endpoint_walks"] = s.d.Poller.EPWalks
 		}
 		out["settings"] = s.d.Store.Settings()
 		v, at := s.d.Store.TopologyVersion()
@@ -790,7 +987,7 @@ func (s *Server) putSite(w http.ResponseWriter, r *http.Request, _ auth.Session)
 		fail(w, 404, "site not found")
 		return
 	}
-	old.Name, old.Subnets, old.Lat, old.Lon, old.CredID, old.Disabled = in.Name, in.Subnets, in.Lat, in.Lon, in.CredID, in.Disabled
+	old.Name, old.Subnets, old.Lat, old.Lon, old.CredID, old.Disabled, old.AddPingOnly, old.SSHCredID = in.Name, in.Subnets, in.Lat, in.Lon, in.CredID, in.Disabled, in.AddPingOnly, in.SSHCredID
 	s.d.Store.PutSite(old)
 	writeJSON(w, 200, old)
 }
@@ -806,7 +1003,9 @@ func (s *Server) putCred(w http.ResponseWriter, r *http.Request, _ auth.Session)
 		fail(w, 400, "credential needs a name")
 		return
 	}
-	if in.Version != "3" {
+	if in.Kind == "ssh" || in.Kind == "gnmi" {
+		in.Version = ""
+	} else if in.Version != "3" {
 		in.Version = "2c"
 	}
 	id := r.PathValue("id")
@@ -826,9 +1025,48 @@ func (s *Server) putCred(w http.ResponseWriter, r *http.Request, _ auth.Session)
 		if in.PrivPass == "••••" {
 			in.PrivPass = old.PrivPass
 		}
+		if in.Password == "••••" {
+			in.Password = old.Password
+		}
+		if in.PrivateKey == "••••" {
+			in.PrivateKey = old.PrivateKey
+		}
+		if in.EnablePass == "••••" {
+			in.EnablePass = old.EnablePass
+		}
 		in.ID = id
 	} else {
 		in.ID = model.NewID("cred")
+	}
+	if in.Kind == "ssh" {
+		if strings.TrimSpace(in.User) == "" {
+			fail(w, 400, "SSH user name required")
+			return
+		}
+		if in.Password == "" && in.PrivateKey == "" {
+			fail(w, 400, "SSH needs a password or a private key")
+			return
+		}
+		if in.Port < 0 || in.Port > 65535 {
+			in.Port = 0
+		}
+		in.Community, in.AuthProto, in.AuthPass, in.PrivProto, in.PrivPass = "", "", "", "", ""
+		s.d.Store.PutCred(in)
+		writeJSON(w, 200, in.Redacted())
+		return
+	}
+	if in.Kind == "gnmi" {
+		if strings.TrimSpace(in.User) == "" || in.Password == "" {
+			fail(w, 400, "gNMI needs a user name and password")
+			return
+		}
+		if in.Port < 0 || in.Port > 65535 {
+			in.Port = 0
+		}
+		in.Community, in.AuthProto, in.AuthPass, in.PrivProto, in.PrivPass, in.PrivateKey, in.EnablePass = "", "", "", "", "", "", ""
+		s.d.Store.PutCred(in)
+		writeJSON(w, 200, in.Redacted())
+		return
 	}
 	if in.Version == "2c" && in.Community == "" {
 		fail(w, 400, "community string required for v2c")
@@ -855,6 +1093,9 @@ func (s *Server) putCred(w http.ResponseWriter, r *http.Request, _ auth.Session)
 		}
 	}
 	s.d.Store.PutCred(in)
+	if s.d.Trap != nil {
+		s.d.Trap.V3.Forget()
+	}
 	code := 200
 	if id == "" {
 		code = 201
@@ -892,6 +1133,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request, _ auth.Sess
 func (s *Server) addDevice(w http.ResponseWriter, r *http.Request, _ auth.Session) {
 	var in struct {
 		IP, SiteID, CredID, Name string
+		PingOnly                 bool `json:"ping_only"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		fail(w, 400, "bad json")
@@ -910,6 +1152,17 @@ func (s *Server) addDevice(w http.ResponseWriter, r *http.Request, _ auth.Sessio
 		fail(w, 409, "a device with this IP already exists")
 		return
 	}
+	if in.PingOnly {
+		dev, added := s.d.Discovery.RegisterPingOnly(in.SiteID, ip.String(), strings.TrimSpace(in.Name), "user", nil)
+		if !added {
+			fail(w, 409, "device already exists")
+			return
+		}
+		s.d.Poller.PollNow(dev.ID)
+		s.d.Engine.Broadcast(state.Change{Type: "device", Data: dev})
+		writeJSON(w, 201, map[string]any{"device": dev})
+		return
+	}
 	// identify now so the user sees what was added
 	name, descr, oid := strings.TrimSpace(in.Name), "", ""
 	creds := s.d.Store.Creds()
@@ -920,6 +1173,30 @@ func (s *Server) addDevice(w http.ResponseWriter, r *http.Request, _ auth.Sessio
 	}
 	credUsed := in.CredID
 	for _, c := range creds {
+		if c.IsGNMI() {
+			if c.ID != in.CredID {
+				continue // gNMI is only tried when chosen explicitly
+			}
+			g := poller.GNMIClient(ip.String(), c)
+			g.Timeout = 5 * time.Second
+			ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+			ups, err := g.Get(ctx, []string{"/system/state"}, 2, gnmi.EncJSONIETF)
+			cancel()
+			g.Close()
+			if err != nil {
+				fail(w, 502, "gNMI: "+err.Error())
+				return
+			}
+			t := gnmi.Tree(ups)
+			if name == "" {
+				name = gnmi.Str(gnmi.Lookup(t, "/system/state/hostname"))
+			}
+			descr, credUsed = "gNMI / OpenConfig", c.ID
+			break
+		}
+		if !c.IsSNMP() {
+			continue
+		}
 		cl := poller.NewClient(ip.String(), c)
 		cl.Timeout = 1500 * time.Millisecond
 		vbs, err := cl.Get(profile.OIDSysName, profile.OIDSysDescr, profile.OIDSysObjectID)
@@ -1008,22 +1285,26 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request, _ auth.Sessio
 			cause = cd.Name
 		}
 	}
+	_, hasW := s.d.Store.Wireless(id)
 	writeJSON(w, 200, map[string]any{"device": d, "interfaces": ifs, "links": links, "names": names, "neighbors": s.d.Store.Neighbors(id),
-		"alerts": alerts, "events": s.d.Store.RecentEvents(id, 50), "cause_name": cause})
+		"alerts": alerts, "events": s.d.Store.RecentEvents(id, 50), "cause_name": cause, "has_wireless": hasW || len(s.d.Store.SDWAN(id)) > 0})
 }
 
 func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request, _ auth.Session) {
 	id := r.PathValue("id")
 	var in struct {
-		Name      *string `json:"name"`
-		Role      *string `json:"role"`
-		Domain    *string `json:"domain"`
-		PollEvery *int    `json:"poll_every"`
-		Monitored *bool   `json:"monitored"`
-		Notes     *string `json:"notes"`
-		CredID    *string `json:"cred_id"`
-		SiteID    *string `json:"site_id"`
-		Location  *string `json:"location"`
+		Name        *string `json:"name"`
+		Role        *string `json:"role"`
+		Domain      *string `json:"domain"`
+		PollEvery   *int    `json:"poll_every"`
+		Monitored   *bool   `json:"monitored"`
+		Notes       *string `json:"notes"`
+		CredID      *string `json:"cred_id"`
+		SiteID      *string `json:"site_id"`
+		Location    *string `json:"location"`
+		PingOnly    *bool   `json:"ping_only"`
+		SSHCredID   *string `json:"ssh_cred_id"`
+		BackupEvery *int    `json:"backup_every"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		fail(w, 400, "bad json")
@@ -1059,6 +1340,15 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request, _ auth.Ses
 		}
 		if in.Notes != nil {
 			d.Notes = *in.Notes
+		}
+		if in.PingOnly != nil {
+			d.PingOnly = *in.PingOnly // switching to SNMP: the next poll runs inventory
+		}
+		if in.SSHCredID != nil {
+			d.SSHCredID = *in.SSHCredID
+		}
+		if in.BackupEvery != nil && *in.BackupEvery >= -1 && *in.BackupEvery <= 24*30 {
+			d.BackupEvery = *in.BackupEvery
 		}
 		if in.CredID != nil {
 			d.CredID = *in.CredID
@@ -1381,6 +1671,10 @@ func (s *Server) snippets(w http.ResponseWriter, r *http.Request, _ auth.Session
 	if _, p, err := net.SplitHostPort(s.d.SyslogAddr); err == nil && p != "" {
 		syslogPort = p
 	}
+	tlsPort := "6514"
+	if _, p, err := net.SplitHostPort(s.d.SyslogTLSAddr); err == nil && p != "" {
+		tlsPort = p
+	}
 	var cisco, nxos, fgt, junos, mikrotik, aruba strings.Builder
 	if cred.Version == "3" {
 		authP := strings.ToUpper(cred.AuthProto)
@@ -1391,7 +1685,7 @@ func (s *Server) snippets(w http.ResponseWriter, r *http.Request, _ auth.Session
 		if privP == "AES" {
 			privP = "aes 128"
 		}
-		fmt.Fprintf(&cisco, "! Cisco IOS / IOS-XE — generated by TopoLight for collector %s\nsnmp-server view TOPOLIGHT iso included\nsnmp-server group TOPOLIGHT-RO v3 priv read TOPOLIGHT\nsnmp-server user %s TOPOLIGHT-RO v3 auth %s <auth-password> priv %s <priv-password>\nsnmp-server host %s version 3 priv %s\n", collector, cred.User, strings.ToLower(authP), privP, collector, cred.User)
+		fmt.Fprintf(&cisco, "! Cisco IOS / IOS-XE — generated by TopoLight for collector %s\nsnmp-server view TOPOLIGHT iso included\nsnmp-server group TOPOLIGHT-RO v3 priv read TOPOLIGHT\nsnmp-server group TOPOLIGHT-RO v3 priv context vlan- match prefix read TOPOLIGHT\nsnmp-server user %s TOPOLIGHT-RO v3 auth %s <auth-password> priv %s <priv-password>\nsnmp-server host %s version 3 priv %s\n! informs instead of traps (acknowledged): the remote engine id is TopoLight's, from Admin → System\n!  snmp-server engineID remote %s %s\n!  snmp-server user %s TOPOLIGHT-RO remote %s v3 auth %s <auth-password> priv %s <priv-password>\n!  snmp-server host %s informs version 3 priv %s\n", collector, cred.User, strings.ToLower(authP), privP, collector, cred.User, collector, s.d.Store.Settings().EngineID, cred.User, collector, strings.ToLower(authP), privP, collector, cred.User)
 		fmt.Fprintf(&nxos, "! Cisco NX-OS — generated by TopoLight\nsnmp-server user %s network-operator auth %s <auth-password> priv %s <priv-password>\nsnmp-server host %s traps version 3 priv %s\n", cred.User, strings.ToLower(authP), strings.ToLower(strings.Fields(privP)[0]), collector, cred.User)
 		fmt.Fprintf(&fgt, "# FortiGate — generated by TopoLight\nconfig system snmp sysinfo\n    set status enable\nend\nconfig system snmp user\n    edit \"%s\"\n        set security-level auth-priv\n        set auth-proto %s\n        set auth-pwd <auth-password>\n        set priv-proto %s\n        set priv-pwd <priv-password>\n        set notify-hosts %s\n        set events cpu-high mem-low log-full intf-ip ha-switch ha-hb-failure ips-signature ips-anomaly av-virus av-oversize fm-if-change\n    next\nend\n", cred.User, strings.ToLower(authP), strings.ToLower(strings.Fields(privP)[0]), collector)
 		fmt.Fprintf(&junos, "# Junos — generated by TopoLight\nset snmp v3 usm local-engine user %s authentication-%s authentication-password <auth-password>\nset snmp v3 usm local-engine user %s privacy-%s privacy-password <priv-password>\nset snmp v3 vacm security-to-group security-model usm security-name %s group TOPOLIGHT\nset snmp v3 vacm access group TOPOLIGHT default-context-prefix security-model usm security-level privacy read-view all\nset snmp view all oid .1 include\n", cred.User, strings.ToLower(authP), cred.User, strings.ToLower(strings.Fields(privP)[0]), cred.User)
@@ -1405,19 +1699,44 @@ func (s *Server) snippets(w http.ResponseWriter, r *http.Request, _ auth.Session
 		fmt.Fprintf(&mikrotik, "# MikroTik\n/snmp community set [find default=yes] name=<community>\n/snmp set enabled=yes trap-target=%s trap-community=<community> trap-version=2\n", collector)
 		fmt.Fprintf(&aruba, "# Aruba AOS-S\nsnmp-server community \"<community>\" operator\nsnmp-server host %s community \"<community>\"\n", collector)
 	}
-	fmt.Fprintf(&cisco, "snmp-server enable traps snmp linkdown linkup coldstart warmstart authentication\nsnmp-server enable traps envmon\nsnmp-server ifindex persist\nlogging host %s transport udp port %s\nlogging trap informational\nservice timestamps log datetime msec localtime show-timezone year\nlldp run\ncdp run\n", collector, syslogPort)
+	fmt.Fprintf(&cisco, "snmp-server enable traps snmp linkdown linkup coldstart warmstart authentication\nsnmp-server enable traps envmon\nsnmp-server ifindex persist\nlogging host %s transport udp port %s\n! or over TLS (IOS-XE, needs a trustpoint that trusts the collector certificate):\n!  logging host %s transport tls port %s\nlogging trap informational\nservice timestamps log datetime msec localtime show-timezone year\nlldp run\ncdp run\n", collector, syslogPort, collector, tlsPort)
 	fmt.Fprintf(&nxos, "snmp-server enable traps link\nlogging server %s 6 port %s\nfeature lldp\n", collector, syslogPort)
-	fmt.Fprintf(&fgt, "config log syslogd setting\n    set status enable\n    set server \"%s\"\n    set port %s\n    set facility local7\nend\nconfig system interface\n    edit \"<mgmt-interface>\"\n        set allowaccess ping snmp\n        set lldp-transmission enable\n    next\nend\n", collector, syslogPort)
+	fmt.Fprintf(&fgt, "config log syslogd setting\n    set status enable\n    set server \"%s\"\n    set port %s\n    set facility local7\n    # for TLS instead: set mode reliable / set port %s / set enc-algorithm high (import the collector certificate first)\nend\nconfig system interface\n    edit \"<mgmt-interface>\"\n        set allowaccess ping snmp\n        set lldp-transmission enable\n    next\nend\n", collector, syslogPort, tlsPort)
 	fmt.Fprintf(&junos, "set system syslog host %s any notice\nset system syslog host %s port %s\nset protocols lldp interface all\n", collector, collector, syslogPort)
 	fmt.Fprintf(&mikrotik, "/system logging action add name=topolight target=remote remote=%s remote-port=%s\n/system logging add action=topolight topics=info,!debug\n/ip neighbor discovery-settings set discover-interface-list=all protocol=lldp,cdp\n", collector, syslogPort)
 	fmt.Fprintf(&aruba, "logging %s\nlogging facility local7\nlldp run\n", collector)
+	// flow export (optional — comment out if the device should not export flows)
+	flowPort, sflowPort := "", ""
+	if _, p, err := net.SplitHostPort(s.d.FlowAddr); err == nil && p != "" {
+		flowPort = p
+	}
+	if _, p, err := net.SplitHostPort(s.d.SFlowAddr); err == nil && p != "" {
+		sflowPort = p
+	}
+	if flowPort != "" {
+		fmt.Fprintf(&cisco, "! NetFlow v9 (optional)\nflow exporter TOPOLIGHT\n destination %s\n transport udp %s\n template data timeout 60\nflow record TOPOLIGHT-REC\n match ipv4 protocol\n match ipv4 source address\n match ipv4 destination address\n match transport source-port\n match transport destination-port\n match interface input\n collect interface output\n collect counter bytes\n collect counter packets\nflow monitor TOPOLIGHT-MON\n exporter TOPOLIGHT\n record TOPOLIGHT-REC\n cache timeout active 60\n! apply on the WAN / uplink interface(s):\n!  interface <uplink>\n!   ip flow monitor TOPOLIGHT-MON input\n!   ip flow monitor TOPOLIGHT-MON output\n", collector, flowPort)
+		fmt.Fprintf(&nxos, "! NetFlow v9 (optional)\nfeature netflow\nflow exporter TOPOLIGHT\n  destination %s\n  transport udp %s\n  version 9\nflow record TOPOLIGHT-REC\n  match ipv4 source address\n  match ipv4 destination address\n  match ip protocol\n  match transport source-port\n  match transport destination-port\n  collect counter bytes\n  collect counter packets\nflow monitor TOPOLIGHT-MON\n  record TOPOLIGHT-REC\n  exporter TOPOLIGHT\n! interface <uplink>: ip flow monitor TOPOLIGHT-MON input\n", collector, flowPort)
+		fmt.Fprintf(&fgt, "# NetFlow v9 (optional)\nconfig system netflow\n    set collector-ip %s\n    set collector-port %s\n    set active-flow-timeout 1\nend\nconfig system interface\n    edit \"<wan-interface>\"\n        set netflow-sampler both\n    next\nend\n", collector, flowPort)
+		fmt.Fprintf(&junos, "# IPFIX (optional, MX/SRX)\nset services flow-monitoring version-ipfix template TOPOLIGHT ipv4-template\nset forwarding-options sampling instance TOPOLIGHT input rate 1\nset forwarding-options sampling instance TOPOLIGHT family inet output flow-server %s port %s version-ipfix template TOPOLIGHT\nset forwarding-options sampling instance TOPOLIGHT family inet output inline-jflow source-address <router-ip>\n# interface <uplink> unit 0 family inet sampling input output\n", collector, flowPort)
+		fmt.Fprintf(&mikrotik, "# Traffic Flow — NetFlow v9 (optional)\n/ip traffic-flow set enabled=yes interfaces=all active-flow-timeout=1m\n/ip traffic-flow target add dst-address=%s port=%s version=9\n", collector, flowPort)
+	}
+	if sflowPort != "" {
+		fmt.Fprintf(&aruba, "# sFlow (optional)\nsflow 1 destination %s %s\nsflow 1 sampling all 512\nsflow 1 polling all 60\n", collector, sflowPort)
+	}
 	out["cisco-ios"] = cisco.String()
 	out["cisco-nxos"] = nxos.String()
 	out["fortinet"] = fgt.String()
 	out["juniper"] = junos.String()
 	out["mikrotik"] = mikrotik.String()
 	out["aruba"] = aruba.String()
-	out["_ports"] = fmt.Sprintf("SNMP polling from %s → devices UDP/161 · traps → collector UDP/%s · syslog → collector UDP or TCP/%s · console TCP/%s", collector, trapPort, syslogPort, portOf(s.d.Listen))
+	ports := fmt.Sprintf("SNMP polling from %s → devices UDP/161 · traps → collector UDP/%s · syslog → collector UDP or TCP/%s · console TCP/%s", collector, trapPort, syslogPort, portOf(s.d.Listen))
+	if flowPort != "" {
+		ports += " · syslog TLS → collector TCP/" + tlsPort + " · NetFlow/IPFIX → collector UDP/" + flowPort
+	}
+	if sflowPort != "" {
+		ports += " · sFlow → collector UDP/" + sflowPort
+	}
+	out["_ports"] = ports
 	writeJSON(w, 200, out)
 }
 
@@ -1443,4 +1762,550 @@ func WriteLicenseKey(dir, key string) error {
 		return nil
 	}
 	return os.WriteFile(filepath.Join(dir, "license.key"), []byte(key+"\n"), 0o600)
+}
+
+// ---- flow -------------------------------------------------------------------
+
+func flowWindowDuration(s string) time.Duration {
+	switch s {
+	case "5m":
+		return 5 * time.Minute
+	case "15m":
+		return 15 * time.Minute
+	case "1h", "":
+		return time.Hour
+	case "6h":
+		return 6 * time.Hour
+	case "24h":
+		return 24 * time.Hour
+	}
+	return time.Hour
+}
+
+// flowExporter resolves ?device=<id> or ?exporter=<ip> to the exporter address.
+func (s *Server) flowExporter(r *http.Request) (string, model.Device, bool) {
+	if id := r.URL.Query().Get("device"); id != "" {
+		d, err := s.d.Store.Device(id)
+		if err != nil {
+			return "", model.Device{}, false
+		}
+		return d.IP, d, true
+	}
+	return r.URL.Query().Get("exporter"), model.Device{}, true
+}
+
+// flowWindow answers GET /api/flow?device=|exporter=&window=5m|15m|1h|6h|24h
+// with a merged Summary; interface rows carry names when the exporter is a device.
+func (s *Server) flowWindow(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	if s.d.Flow == nil {
+		fail(w, 503, "flow collector disabled")
+		return
+	}
+	exp, dev, ok := s.flowExporter(r)
+	if !ok {
+		fail(w, 404, "device not found")
+		return
+	}
+	win := r.URL.Query().Get("window")
+	sum := s.d.Flow.Agg.Window(exp, flowWindowDuration(win), time.Now())
+	type ifRow struct {
+		flow.IfStat
+		Name  string `json:"name,omitempty"`
+		Alias string `json:"alias,omitempty"`
+		IfID  string `json:"if_id,omitempty"`
+	}
+	names := map[string]string{}
+	rows := make([]ifRow, 0, len(sum.Ifaces))
+	if dev.ID != "" {
+		byIdx := map[int]model.Interface{}
+		for _, i := range s.d.Store.Interfaces(dev.ID) {
+			byIdx[i.Index] = i
+		}
+		for _, st := range sum.Ifaces {
+			row := ifRow{IfStat: st}
+			if i, ok := byIdx[int(st.IfIndex)]; ok {
+				row.Name, row.Alias, row.IfID = i.Name, i.Alias, i.ID
+			}
+			rows = append(rows, row)
+		}
+	}
+	// device names for addresses that are monitored devices (nice in the tables)
+	for _, e := range append(append([]flow.Entry{}, sum.Talkers...), sum.Targets...) {
+		if d, ok := s.d.Store.DeviceByIP(e.Key); ok {
+			names[e.Key] = d.Name
+		}
+	}
+	writeJSON(w, 200, map[string]any{"summary": sum, "window": win, "ifaces": rows, "names": names, "device": dev.ID, "device_name": dev.Name})
+}
+
+func (s *Server) flowExporters(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	if s.d.Flow == nil {
+		fail(w, 503, "flow collector disabled")
+		return
+	}
+	type row struct {
+		flow.ExporterInfo
+		DeviceID string `json:"device_id,omitempty"`
+		Name     string `json:"name,omitempty"`
+	}
+	var out []row
+	for _, e := range s.d.Flow.Agg.Exporters() {
+		x := row{ExporterInfo: e}
+		if d, ok := s.d.Store.DeviceByIP(e.Exporter); ok {
+			x.DeviceID, x.Name = d.ID, d.Name
+		}
+		out = append(out, x)
+	}
+	if out == nil {
+		out = []row{}
+	}
+	writeJSON(w, 200, map[string]any{"exporters": out, "stats": s.d.Flow.Stats()})
+}
+
+func (s *Server) flowSeries(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	if s.d.Flow == nil {
+		fail(w, 503, "flow collector disabled")
+		return
+	}
+	exp, _, ok := s.flowExporter(r)
+	if !ok {
+		fail(w, 404, "device not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"points": s.d.Flow.Agg.Series(exp, flowWindowDuration(r.URL.Query().Get("window")), time.Now())})
+}
+
+// ---- endpoints ----------------------------------------------------------------
+
+// listEndpoints answers GET /api/endpoints?q=&device=&if=&limit= — newest first,
+// with device names resolved for the tables.
+func (s *Server) listEndpoints(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	if s.d.Endpoints == nil {
+		fail(w, 503, "endpoint tracking disabled")
+		return
+	}
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit <= 0 || limit > 5000 {
+		limit = 500
+	}
+	ifIndex, _ := strconv.Atoi(q.Get("if"))
+	list := s.d.Endpoints.Query(q.Get("q"), q.Get("device"), ifIndex, limit)
+	names := map[string]string{}
+	for _, e := range list {
+		for _, id := range []string{e.DeviceID, e.ARPDevice} {
+			if id != "" && names[id] == "" {
+				if d, err := s.d.Store.Device(id); err == nil {
+					names[id] = d.Name
+				}
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]any{"endpoints": list, "names": names, "stats": s.d.Endpoints.Stats(time.Now())})
+}
+
+func (s *Server) getEndpoint(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	if s.d.Endpoints == nil {
+		fail(w, 503, "endpoint tracking disabled")
+		return
+	}
+	e, ok := s.d.Endpoints.Get(r.PathValue("mac"))
+	if !ok {
+		fail(w, 404, "unknown MAC")
+		return
+	}
+	writeJSON(w, 200, e)
+}
+
+// deviceEndpoints answers GET /api/devices/{id}/endpoints: everything placed on
+// this device grouped per port, plus per-port counts for the interface table.
+func (s *Server) deviceEndpoints(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	if s.d.Endpoints == nil {
+		fail(w, 503, "endpoint tracking disabled")
+		return
+	}
+	id := r.PathValue("id")
+	if _, err := s.d.Store.Device(id); err != nil {
+		fail(w, 404, "device not found")
+		return
+	}
+	list := s.d.Endpoints.Query("", id, 0, 0)
+	placed := make([]endpoint.Endpoint, 0, len(list))
+	resolved := make([]endpoint.Endpoint, 0)
+	for _, e := range list {
+		if e.DeviceID == id {
+			placed = append(placed, e)
+		} else {
+			resolved = append(resolved, e) // ARP-only: this device resolved the IP but did not learn the MAC on an access port
+		}
+	}
+	counts := map[string]int{}
+	for k, v := range s.d.Endpoints.PortCounts(id) {
+		counts[strconv.Itoa(k)] = v
+	}
+	names := map[string]string{}
+	for _, e := range resolved {
+		if e.DeviceID != "" && names[e.DeviceID] == "" {
+			if d, err := s.d.Store.Device(e.DeviceID); err == nil {
+				names[e.DeviceID] = d.Name
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]any{"placed": placed, "resolved": resolved, "port_counts": counts, "names": names})
+}
+
+// ---- API tokens ----------------------------------------------------------------
+
+func (s *Server) listTokens(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	type row struct {
+		ID, Name, Role, Prefix, Creator string
+		Created, LastUsed               time.Time
+	}
+	out := []row{}
+	for _, t := range s.d.Store.Tokens() {
+		out = append(out, row{t.ID, t.Name, t.Role, t.Prefix, t.Creator, t.Created, t.LastUsed})
+	}
+	writeJSON(w, 200, out)
+}
+
+// addToken creates a bearer token; the secret is returned exactly once.
+func (s *Server) addToken(w http.ResponseWriter, r *http.Request, sess auth.Session) {
+	var in struct{ Name, Role string }
+	if err := readJSON(r, &in); err != nil {
+		fail(w, 400, "bad json")
+		return
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" || len(in.Name) > 60 {
+		fail(w, 400, "a short name is required")
+		return
+	}
+	switch in.Role {
+	case "viewer", "operator", "admin":
+	default:
+		in.Role = "viewer"
+	}
+	if !roleAllows(sess.Role, in.Role) {
+		fail(w, 403, "a token cannot outrank its creator")
+		return
+	}
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		fail(w, 500, "entropy")
+		return
+	}
+	secret := "tl_" + base64.RawURLEncoding.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(secret))
+	t := model.APIToken{ID: model.NewID("tok"), Name: in.Name, Role: in.Role, Hash: hex.EncodeToString(sum[:]), Prefix: secret[:8], Created: time.Now(), Creator: sess.Name}
+	s.d.Store.PutToken(t)
+	writeJSON(w, 201, map[string]any{"id": t.ID, "name": t.Name, "role": t.Role, "prefix": t.Prefix, "secret": secret,
+		"example": "curl -H 'Authorization: Bearer " + secret + "' " + s.baseURL(r) + "/api/status"})
+}
+
+func (s *Server) baseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+// ---- probes -----------------------------------------------------------------------
+
+func (s *Server) listProbes(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	names := map[string]string{}
+	list := s.d.Store.Probes()
+	for _, p := range list {
+		if p.DeviceID != "" {
+			if d, err := s.d.Store.Device(p.DeviceID); err == nil {
+				names[p.DeviceID] = d.Name
+			}
+		}
+	}
+	var sums map[string]probe.Summary
+	if s.d.Probes != nil {
+		sums = s.d.Probes.Summaries()
+	}
+	writeJSON(w, 200, map[string]any{"probes": list, "summaries": sums, "names": names, "types": probe.Types, "traceroute": s.d.Probes != nil && s.d.Probes.Traceroute != nil})
+}
+
+func (s *Server) getProbe(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	p, err := s.d.Store.Probe(r.PathValue("id"))
+	if err != nil {
+		fail(w, 404, "probe not found")
+		return
+	}
+	out := map[string]any{"probe": p}
+	if s.d.Probes != nil {
+		out["history"] = s.d.Probes.History(p.ID)
+		out["path"] = s.d.Probes.Path(p.ID)
+		if l, ok := s.d.Probes.Last(p.ID); ok {
+			out["last"] = l
+		}
+	}
+	writeJSON(w, 200, out)
+}
+
+// putProbe creates (POST) or updates (PUT) a probe.
+func (s *Server) putProbe(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	var in model.Probe
+	if err := readJSON(r, &in); err != nil {
+		fail(w, 400, "bad json")
+		return
+	}
+	in.Name, in.Target, in.Type, in.Expect, in.Resolver = strings.TrimSpace(in.Name), strings.TrimSpace(in.Target), strings.TrimSpace(in.Type), strings.TrimSpace(in.Expect), strings.TrimSpace(in.Resolver)
+	valid := false
+	for _, t := range probe.Types {
+		if t == in.Type {
+			valid = true
+		}
+	}
+	if !valid {
+		fail(w, 400, "type must be one of "+strings.Join(probe.Types, ", "))
+		return
+	}
+	if in.Target == "" {
+		fail(w, 400, "a target is required")
+		return
+	}
+	if in.Name == "" {
+		in.Name = in.Type + " " + in.Target
+	}
+	if in.Every < 10 {
+		in.Every = 60
+	}
+	if in.Type == "traceroute" && in.Every < 300 {
+		in.Every = 300
+	}
+	if in.Timeout <= 0 || in.Timeout > 60 {
+		in.Timeout = 5
+	}
+	if in.DeviceID != "" {
+		if _, err := s.d.Store.Device(in.DeviceID); err != nil {
+			in.DeviceID = ""
+		}
+	}
+	if id := r.PathValue("id"); id != "" {
+		old, err := s.d.Store.Probe(id)
+		if err != nil {
+			fail(w, 404, "probe not found")
+			return
+		}
+		in.ID, in.Created = old.ID, old.Created
+	} else {
+		in.ID, in.Created, in.Enabled = model.NewID("prb"), time.Now(), true
+	}
+	s.d.Store.PutProbe(in)
+	if s.d.Probes != nil {
+		s.d.Probes.Now(in.ID)
+	}
+	writeJSON(w, 200, in)
+}
+
+// ---- configuration backups --------------------------------------------------------
+
+func (s *Server) deviceConfigs(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	id := r.PathValue("id")
+	d, err := s.d.Store.Device(id)
+	if err != nil {
+		fail(w, 404, "device not found")
+		return
+	}
+	vs, st := s.d.Backup.Cfg.Versions(id)
+	_, hasCred := s.d.Backup.CredFor(d)
+	rc := backup.RecipeFor(d.ProfileID)
+	writeJSON(w, 200, map[string]any{"versions": vs, "status": st, "has_cred": hasCred, "recipe": map[string]any{"show": rc.Show, "exec": rc.Exec}, "every_hours": func() int {
+		if d.BackupEvery != 0 {
+			return d.BackupEvery
+		}
+		if h := s.d.Store.Settings().BackupEveryHours; h != 0 {
+			return h
+		}
+		return 24
+	}()})
+}
+
+func (s *Server) deviceConfig(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	txt, err := s.d.Backup.Cfg.Read(r.PathValue("id"), r.PathValue("ver"))
+	if err != nil {
+		fail(w, 404, "version not found")
+		return
+	}
+	if r.URL.Query().Get("raw") != "" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+r.PathValue("id")+"-"+r.PathValue("ver")+".txt\"")
+		w.Write([]byte(txt))
+		return
+	}
+	writeJSON(w, 200, map[string]any{"text": txt})
+}
+
+// deviceConfigDiff answers ?context=N (default 3; 0 = full) with hunks between two versions.
+func (s *Server) deviceConfigDiff(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	id := r.PathValue("id")
+	a, err := s.d.Backup.Cfg.Read(id, r.PathValue("ver"))
+	if err != nil {
+		fail(w, 404, "version not found")
+		return
+	}
+	b, err := s.d.Backup.Cfg.Read(id, r.PathValue("other"))
+	if err != nil {
+		fail(w, 404, "version not found")
+		return
+	}
+	volatile := r.URL.Query().Get("volatile") == "1"
+	if !volatile {
+		d, err := s.d.Store.Device(id)
+		if err == nil {
+			rc := backup.RecipeFor(d.ProfileID)
+			a, b = backup.Normalise(a, rc), backup.Normalise(b, rc)
+		}
+	}
+	ops := backup.Diff(strings.Split(strings.TrimRight(a, "\n"), "\n"), strings.Split(strings.TrimRight(b, "\n"), "\n"))
+	added, removed := backup.Counts(ops)
+	ctxLines := 3
+	if c := r.URL.Query().Get("context"); c != "" {
+		ctxLines, _ = strconv.Atoi(c)
+	}
+	if ctxLines > 0 {
+		ops = backup.Hunks(ops, ctxLines)
+	}
+	writeJSON(w, 200, map[string]any{"ops": ops, "added": added, "removed": removed})
+}
+
+func (s *Server) backupNow(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	d, err := s.d.Store.Device(r.PathValue("id"))
+	if err != nil {
+		fail(w, 404, "device not found")
+		return
+	}
+	v, changed, err := s.d.Backup.Backup(r.Context(), d, "user")
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "version": v, "changed": changed})
+}
+
+// configOverview lists every device with its backup status (Devices page column / report).
+func (s *Server) configOverview(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	st := s.d.Backup.Cfg.Statuses()
+	type row struct {
+		DeviceID string         `json:"device_id"`
+		Name     string         `json:"name"`
+		HasCred  bool           `json:"has_cred"`
+		Status   *backup.Status `json:"status,omitempty"`
+	}
+	out := []row{}
+	for _, d := range s.d.Store.Devices() {
+		if d.PingOnly {
+			continue
+		}
+		_, ok := s.d.Backup.CredFor(d)
+		x := row{DeviceID: d.ID, Name: d.Name, HasCred: ok}
+		if v, has := st[d.ID]; has {
+			vv := v
+			x.Status = &vv
+		}
+		out = append(out, x)
+	}
+	writeJSON(w, 200, map[string]any{"devices": out, "stats": s.d.Backup.Stats()})
+}
+
+// ---- reports ------------------------------------------------------------------------
+
+func (s *Server) listReports(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	writeJSON(w, 200, map[string]any{"reports": s.d.Store.Reports(), "sections": report.Sections, "files": s.d.Reports.List(""), "smtp": s.d.Notify != nil && s.d.Notify.SMTP.Host != ""})
+}
+
+func (s *Server) putReport(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	var in model.Report
+	if err := readJSON(r, &in); err != nil {
+		fail(w, 400, "bad json")
+		return
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		in.Name = "Network report"
+	}
+	var secs []string
+	for _, x := range in.Sections {
+		for _, ok := range report.Sections {
+			if x == ok {
+				secs = append(secs, x)
+			}
+		}
+	}
+	in.Sections = secs
+	switch in.Period {
+	case "24h", "7d", "30d":
+	default:
+		in.Period = "7d"
+	}
+	switch in.Schedule {
+	case "", "daily", "weekly", "monthly":
+	default:
+		in.Schedule = ""
+	}
+	if in.Hour < 0 || in.Hour > 23 {
+		in.Hour = 7
+	}
+	var to []string
+	for _, e := range in.EmailTo {
+		if e = strings.TrimSpace(e); e != "" {
+			to = append(to, e)
+		}
+	}
+	in.EmailTo = to
+	if id := r.PathValue("id"); id != "" {
+		old, err := s.d.Store.Report(id)
+		if err != nil {
+			fail(w, 404, "report not found")
+			return
+		}
+		in.ID, in.Created, in.LastRun, in.LastErr = old.ID, old.Created, old.LastRun, old.LastErr
+	} else {
+		in.ID, in.Created, in.Enabled = model.NewID("rpt"), time.Now(), true
+	}
+	s.d.Store.PutReport(in)
+	writeJSON(w, 200, in)
+}
+
+// runReport generates now; ?mail=1 also sends it to the recipients.
+func (s *Server) runReport(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	rep, err := s.d.Store.Report(r.PathValue("id"))
+	if err != nil {
+		fail(w, 404, "report not found")
+		return
+	}
+	_, file, err := s.d.Reports.RunReport(rep, time.Now(), r.URL.Query().Get("mail") == "1")
+	out := map[string]any{"ok": err == nil, "file": file}
+	if err != nil {
+		out["error"] = err.Error()
+	}
+	writeJSON(w, 200, out)
+}
+
+// previewReport renders an ad-hoc report: ?sections=a,b&period=7d&site=&format=html|csv|json
+func (s *Server) previewReport(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	q := r.URL.Query()
+	rep := model.Report{Name: q.Get("name"), Period: q.Get("period"), SiteID: q.Get("site")}
+	if sec := q.Get("sections"); sec != "" {
+		rep.Sections = strings.Split(sec, ",")
+	}
+	if rep.Name == "" {
+		rep.Name = "Network report"
+	}
+	res := report.Generate(s.d.Reports.Deps, rep, time.Now())
+	switch q.Get("format") {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"topolight-report.csv\"")
+		w.Write(report.CSV(res))
+	case "json":
+		writeJSON(w, 200, res)
+	default:
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(report.HTML(res, s.d.Reports.Deps.Instance)))
+	}
 }
