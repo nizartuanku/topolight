@@ -66,7 +66,7 @@ Self-hosted network monitoring with a live LLDP/CDP topology map. One static bin
 | Everything in §1–2, plus Telegram and signed webhook, maintenance windows, admin / operator / viewer roles, JSON export API | ✓ | ✓ | ✓ |
 | Price | $0 (GitHub) | $49 / month | $149 / month |
 
-One binary for all three and no feature gating — tiers differ only in capacity and history; an offline Ed25519 licence key raises the caps. Over the cap, the newest devices are marked *not monitored* and the API answers `402` with a readable message — nothing breaks, nothing is deleted. A missing or expired key runs as Free.
+One binary for all three and no feature gating — tiers differ only in capacity and history; an offline Ed25519 licence key raises the caps. Keys are issued for the installation's **Instance ID** (Admin → Licence; a cluster shares one) and are refused elsewhere. Over the cap, the newest devices are marked *not monitored* and the API answers `402` with a readable message — nothing breaks, nothing is deleted. A missing, expired or foreign-instance key runs as Free.
 
 ## 4. Server requirements
 

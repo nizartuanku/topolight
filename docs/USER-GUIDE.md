@@ -175,6 +175,8 @@ Failover is automatic with three or more full nodes (a new leader within about 2
 
 **Admin → Licence** shows the tier, caps and what the key allows; paste a key there or start with `-license` / `TOPOLIGHT_LICENSE`. Keys are Ed25519-signed and checked offline — a bad or expired key runs as Free with a plain-language notice, never an error. Dropping from a higher tier keeps the oldest devices monitored up to the cap and marks the rest *not monitored*; nothing is deleted.
 
+**Instance ID.** The same page shows this installation's Instance ID (`TL-XXXX-XXXX-XXXX`, stored in `<data>/instance.id`, created on first start). A licence key is issued for one Instance ID — enter it at checkout and the key you receive works only on that installation. A cluster shares one Instance ID (the file is mirrored to every node), so the key stays valid after a failover. If you rebuild the server, restore the data directory (the ID travels with it) or ask for the key to be re-issued for the new ID; a key bound to another instance is refused with a notice naming both IDs and the licence already in force is left unchanged.
+
 ## 13. Export
 
 `GET /api/export.json` returns sites, devices, interfaces, links and alerts — the same data the console shows — for scripts and inventories. Authenticate with the session cookie; an API-token option is planned.

@@ -58,14 +58,14 @@ curl -fsSL https://raw.githubusercontent.com/nizartuanku/topolight/main/install.
 
 The script downloads the release tarball for your CPU, verifies it against `SHA256SUMS`, installs `/usr/local/bin/topolight`, creates a `topolight` system user, grants the binary `cap_net_raw` (ICMP) and `cap_net_bind_service` (ports 514/162), writes `/etc/topolight/topolight.env` and a hardened systemd unit, and starts the service. Re-running it upgrades the binary and keeps `/var/lib/topolight`.
 
-Offline host: download the tarball on another machine and run `TOPOLIGHT_TARBALL=/path/topolight_0.4.0_linux_amd64.tar.gz sudo sh install.sh`.
+Offline host: download the tarball on another machine and run `TOPOLIGHT_TARBALL=/path/topolight_0.4.1_linux_amd64.tar.gz sudo sh install.sh`.
 
 Then open `http://<host>:8433` and follow the wizard. The first request creates the admin user — do this straight away.
 
 ## 3. Install by hand
 
 ```sh
-tar -xzf topolight_0.4.0_linux_amd64.tar.gz && cd topolight_0.4.0_linux_amd64
+tar -xzf topolight_0.4.1_linux_amd64.tar.gz && cd topolight_0.4.1_linux_amd64
 sha256sum -c ../SHA256SUMS --ignore-missing
 sudo install -m 0755 topolight /usr/local/bin/topolight
 sudo setcap 'cap_net_raw,cap_net_bind_service=+ep' /usr/local/bin/topolight   # ICMP + ports < 1024 without root
@@ -79,10 +79,10 @@ Without `setcap`, either run as root (not recommended), allow unprivileged ICMP 
 ## 4. Docker
 
 ```sh
-docker build -t topolight:0.4.0 .
+docker build -t topolight:0.4.1 .
 docker run -d --name topolight --restart unless-stopped \
   -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp -p 6514:6514 \
-  -v topolight-data:/data topolight:0.4.0
+  -v topolight-data:/data topolight:0.4.1
 ```
 
 or `docker compose up -d` with the included `docker-compose.yml`. The container runs as an unprivileged user with the two capabilities set on the binary. If your devices send syslog to the *host* IP, the port mappings above are all you need; with `--network host` the container sees devices' real source addresses, which is what TopoLight uses to match syslog/traps to devices — behind a NAT'd bridge they arrive from the Docker gateway and cannot be matched. **Use `--network host` when you can.**
@@ -148,7 +148,7 @@ Directly: `-tls-cert /etc/ssl/topolight.crt -tls-key /etc/ssl/topolight.key`. Or
 
 ## 8. Backup and restore
 
-Everything lives under the data directory: `state.json` (inventory, topology, alerts, users, rules — rewritten atomically every 15 s when something changed), `events/`, `logs/`, `tsdb/`, `profiles/`, `license.key`. Stop the service or just copy the directory — a copy taken mid-write is still consistent because files are replaced by rename. Restore = put it back and start.
+Everything lives under the data directory: `state.json` (inventory, topology, alerts, users, rules — rewritten atomically every 15 s when something changed), `events/`, `logs/`, `tsdb/`, `profiles/`, `license.key`, `instance.id` (the Instance ID your licence is bound to — keep it with the data). Stop the service or just copy the directory — a copy taken mid-write is still consistent because files are replaced by rename. Restore = put it back and start.
 
 ## 9. Upgrade
 
