@@ -584,6 +584,7 @@ func (e *Engine) onInterface(s model.InterfaceSample) {
 		x.OperUp, x.AdminUp = s.OperUp, s.AdminUp
 		if s.HaveRates {
 			x.InBps, x.OutBps, x.InUtil, x.OutUtil, x.InErrRate, x.OutErrRate = s.InBps, s.OutBps, s.InUtil, s.OutUtil, s.InErrRate, s.OutErrRate
+			x.InPps, x.OutPps, x.InDropRate, x.OutDropRate = s.InPps, s.OutPps, s.InDropRate, s.OutDropRate
 		}
 	})
 	if changed {
