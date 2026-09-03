@@ -80,7 +80,7 @@ CGO_ENABLED=0 go build -o topolight ./cmd/topolight
 | Metric and log retention | 7 days | 6 months | 12 months |
 | Users | 3 | 5 | unlimited |
 | Every feature — ICMP + SNMP v2c/v3, LLDP/CDP topology 2D + 3D, syslog + traps, NetFlow/IPFIX/sFlow, state engine, e-mail + Telegram + signed webhook, maintenance windows, admin/operator/viewer roles, export API | ✓ | ✓ | ✓ |
-| Price | $0 | $49 | $149 |
+| Price | $0 | $99 / month | $249 / month |
 
 Tiers differ only in capacity and history. Every feature works in Free, so you can try all of it on a small network before paying for a bigger one.
 
