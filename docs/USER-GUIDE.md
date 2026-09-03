@@ -29,7 +29,8 @@ Each site is drawn as stacked discs: **edge** (routers, firewalls) on top, then 
 - **3D / 2D** — drag to orbit (3D), shift-drag to pan, scroll to zoom, double-click to reset. 2D lays the same graph flat.
 - **Status / Utilisation** overlay — colour by state, or by link utilisation and device CPU.
 - **Low-confidence links** — links seen from only one side (confidence 0.8) or to nodes outside the inventory (0.6, drawn dashed) are hidden unless you tick the box. Links seen from both ends are 1.0.
-- Click a node for its panel (status, cause, alerts, open device). A device that is *unreachable* is drawn dashed: its own state is unknown because an upstream device is down — the cause is named in the panel.
+- **Hover a node** for its health card: status and cause, CPU / memory / temperature, RTT and loss, interface counts (up · down · shut · total, uplinks down called out), aggregate traffic in and out as bit/s and packets/s, packet drops (ifInDiscards/ifOutDiscards) and errors per second, the three busiest ports by utilisation (with their own drop/error rate), and the list of ports that are admin-up but operationally down (uplinks first). The card is the last poll's values straight from the store — nothing is estimated — and refreshes live while you hover.
+- Click a node for its panel (the same health card, links, alerts, open device). A device that is *unreachable* is drawn dashed: its own state is unknown because an upstream device is down — the cause is named in the panel.
 - **Rebuild now** re-walks LLDP/CDP on every device (also runs every 30 minutes by default). Links that disappear are kept greyed for 7 days, then dropped. Manual links (Device → Links) are never dropped.
 
 ## 5. Alerts
@@ -53,7 +54,7 @@ An alert that resolves and re-triggers within 30 minutes is re-opened with its h
 
 ## 6. Devices
 
-The table filters by status, site and free text. A device page shows CPU, memory, RTT and loss over the last hour, interfaces with live rates, utilisation bars and error rates, links and neighbours (LLDP/CDP observations, including unresolved ones — useful when a neighbour is not in the inventory yet), alerts and events, and config snippets. Star an interface (★) to make it *important*: it gets 60-second history and a real alert when it goes down. Uplinks and LLDP peers are starred automatically.
+The table filters by status, site and free text. A device page shows CPU, memory, RTT and loss over the last hour, interfaces with live rates (bit/s and packets/s), utilisation bars, drop and error rates, links and neighbours (LLDP/CDP observations, including unresolved ones — useful when a neighbour is not in the inventory yet), alerts and events, and config snippets. Star an interface (★) to make it *important*: it gets 60-second history and a real alert when it goes down. Uplinks and LLDP peers are starred automatically.
 
 **Add device** by hand when discovery cannot reach it. **Edit** to lock role, domain (network/security), site, poll interval (15–3600 s) or to stop monitoring it. **Delete** removes its history too.
 

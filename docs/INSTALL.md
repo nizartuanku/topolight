@@ -16,6 +16,19 @@ Measured storage cost (worst case, noisy values): **≈4.5 KB per series per day
 
 Idle access ports compress far better than the worst case, so real estates typically land at a third of those figures; the Overview header and Admin → System show the live number so you can watch the trend after a week and size the disk from that. Devices you do not care about can be set *not monitored* to keep them out of the budget.
 
+## 1a. Deployment topology: what the server is, and what it is not
+
+**One process, one host.** The `topolight` binary contains everything: discovery, the ICMP pinger, the SNMP poller, the syslog and trap receivers, the topology builder, the state/alert engine, the notifier, the embedded time-series and log stores, and the web console with its live event stream. There is no database server, message bus, cache or agent to install next to it, and no component runs on the monitored devices.
+
+| Mode | Status in 0.1 | What it means |
+|---|---|---|
+| **Standalone** | shipped | One VM/host (table above) monitors the whole estate over routed IP. This is the only supported mode today. |
+| **Warm standby (host-level)** | works, manual | Run TopoLight on a VM and use your hypervisor's HA or a scheduled copy of `/var/lib/topolight` (see §8 Backups) to a second host. The data directory is self-contained, so restoring it on another host with the same licence key brings the console back with its history. Point devices' syslog/trap targets at a VIP or DNS name you can move. |
+| **Active/active HA** | not yet | Two instances polling the same devices would double the SNMP load and raise duplicate alerts; there is no shared state or leader election in 0.1. Planned for 0.2 together with remote collectors. |
+| **Cluster / remote collectors** | not yet | 0.2 work: a lightweight collector per site (SNMP/ICMP/syslog locally, results forwarded to the central engine) for estates with many sites, NAT'd branches or >1,500 devices. |
+
+A 1,500-device estate fits comfortably on one host (¼ core, 110 MB RAM measured), so for the Free/Pro/Team tiers the limiting factor is disk for history, not compute or resilience. If losing the console for the minutes it takes to restore a VM is unacceptable for you today, wait for 0.2 or run the warm-standby pattern above.
+
 ## 2. Install with the script (systemd hosts)
 
 ```sh
