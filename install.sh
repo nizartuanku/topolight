@@ -151,11 +151,14 @@ systemctl restart topolight
 sleep 1
 if systemctl is-active --quiet topolight; then
   IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  # the console port actually in use (an upgraded 0.1 install may still say 8432)
+  PORT="$(sed -n 's/.*[= ]-listen [^ :]*:\([0-9][0-9]*\).*/\1/p' "$CONF_DIR/topolight.env" 2>/dev/null | head -n1)"
+  PORT="${PORT:-8433}"
   say "TopoLight $("$BIN_DIR/topolight" -version | awk '{print $2}') is running."
   if [ -n "$JOIN" ]; then
-    say "This node joined the cluster at $JOIN as a $ROLE node; its console at http://${IP:-<this-host>}:8433 proxies to the leader."
+    say "This node joined the cluster at $JOIN as a $ROLE node; its console at http://${IP:-<this-host>}:$PORT proxies to the leader."
   else
-    say "Open http://${IP:-<this-host>}:8433 and follow the setup wizard."
+    say "Open http://${IP:-<this-host>}:$PORT and follow the setup wizard."
   fi
   say "Logs: journalctl -u topolight -f   ·   config: $CONF_DIR/topolight.env   ·   data: $DATA_DIR"
 else
