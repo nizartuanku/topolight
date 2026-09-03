@@ -33,7 +33,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-VERSION="${TOPOLIGHT_VERSION:-v0.4.0}"
+VERSION="${TOPOLIGHT_VERSION:-v0.4.1}"
 REPO="nizartuanku/topolight"
 BIN_DIR="/usr/local/bin"
 DATA_DIR="/var/lib/topolight"

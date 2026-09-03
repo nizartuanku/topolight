@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 — 2026-09-03
 
+- Licence keys are bound to an **Instance ID**. Every installation creates `<data>/instance.id` on first start (`TL-XXXX-XXXX-XXXX`, shown under Admin → Licence with a Copy button and checkout links); a key that names an instance is accepted only there. The file is mirrored across a cluster, so one cluster shares one Instance ID and a bound key keeps working after failover. Unbound keys still work anywhere. Enter the Instance ID at checkout — the key is issued for it automatically. `GET /api/license` and `/api/status` carry `instance`; `licgen issue/verify -instance`.
+- A rejected licence key no longer replaces the licence in force (it only reports why it was rejected).
 - Accessibility: light theme "up"/"ok" and "unknown" badge colours darkened to meet WCAG AA contrast on tinted rows; Reports quick-report selects gained accessible names. axe: 0 violations across 16 pages × 2 themes.
 - install.sh prints the console port actually configured (an upgraded 0.1 install keeps 8432 until you change it).
 

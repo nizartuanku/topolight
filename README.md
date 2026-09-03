@@ -47,11 +47,11 @@ The installer downloads the release tarball, verifies it against `SHA256SUMS`, c
 Docker (build the image from this repo — a published `hexward/topolight` image follows once it has been through the same checks):
 
 ```sh
-docker build -t topolight:0.4.0 .
+docker build -t topolight:0.4.1 .
 docker run -d --name topolight \
   -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp \
   -v topolight-data:/data \
-  topolight:0.4.0
+  topolight:0.4.1
 ```
 
 Or download the tarball from [Releases](https://github.com/nizartuanku/topolight/releases), verify `SHA256SUMS`, and run `./topolight` — everything is flags, `topolight -h` lists them. See [docs/INSTALL.md](docs/INSTALL.md) for systemd, TLS, ports and unprivileged ICMP.
@@ -84,7 +84,7 @@ CGO_ENABLED=0 go build -o topolight ./cmd/topolight
 
 Tiers differ only in capacity and history. Every feature works in Free, so you can try all of it on a small network before paying for a bigger one.
 
-Caps are enforced honestly: over the limit, discovery still lists the device but marks it *not monitored* and the API answers `402` with a readable message. The licence is an offline Ed25519 key — no phone-home, no account. [Get a key on Whop](https://whop.com/nizar-tuanku/topolight?utm_source=github) (14-day trial).
+Caps are enforced honestly: over the limit, discovery still lists the device but marks it *not monitored* and the API answers `402` with a readable message. The licence is an offline Ed25519 key — no phone-home, no account — issued for the **Instance ID** shown under Admin → Licence (one per installation; a cluster shares one). [Get a key on Whop](https://whop.com/nizar-tuanku/topolight?utm_source=github) (14-day trial).
 
 ## Honest limits
 
