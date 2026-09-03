@@ -14,16 +14,31 @@
 # Re-running upgrades the binary and keeps your data in /var/lib/topolight.
 # Set TOPOLIGHT_VERSION=vX.Y.Z to pin a version; TOPOLIGHT_TARBALL=path to
 # install from a local file (offline hosts).
+#
+# Cluster: add "--join https://node1:8434 --token TL-JOIN-…" (from Admin →
+# Cluster on an existing node) to install this server as a standby with a
+# full data copy; add "--role collector" for a poll-and-forward node.
 set -eu
 
-VERSION="${TOPOLIGHT_VERSION:-v0.1.0}"
+say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+JOIN=""; TOKEN=""; ROLE="full"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --join) JOIN="$2"; shift 2 ;;
+    --token) TOKEN="$2"; shift 2 ;;
+    --role) ROLE="$2"; shift 2 ;;
+    *) die "unknown option $1" ;;
+  esac
+done
+
+VERSION="${TOPOLIGHT_VERSION:-v0.4.0}"
 REPO="nizartuanku/topolight"
 BIN_DIR="/usr/local/bin"
 DATA_DIR="/var/lib/topolight"
 CONF_DIR="/etc/topolight"
 
-say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
-die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo sh install.sh)"
 command -v systemctl >/dev/null 2>&1 || die "systemd not found — download the tarball and run ./topolight by hand (see docs/INSTALL.md)"
@@ -83,6 +98,9 @@ else
   say "setcap not available — install libcap2-bin (Debian) / libcap (RHEL) for ICMP and ports <1024"
 fi
 
+if [ -f "$CONF_DIR/topolight.env" ] && grep -q ':8432' "$CONF_DIR/topolight.env"; then
+  say "Note: your topolight.env still uses port 8432 (the 0.1 default). The console now defaults to 8433; edit -listen in $CONF_DIR/topolight.env if you want to follow."
+fi
 if [ ! -f "$CONF_DIR/topolight.env" ]; then
   say "Writing $CONF_DIR/topolight.env"
   cat > "$CONF_DIR/topolight.env" <<EOF
@@ -90,9 +108,11 @@ if [ ! -f "$CONF_DIR/topolight.env" ]; then
 # The console listens on every interface by default here because a
 # monitoring server is normally reached from a workstation. Put it behind
 # HTTPS (-tls-cert/-tls-key or a reverse proxy) before exposing it widely.
-TOPOLIGHT_OPTS=-listen 0.0.0.0:8432 -data $DATA_DIR -syslog-listen :514 -trap-listen :162
+TOPOLIGHT_OPTS=-listen 0.0.0.0:8433 -data $DATA_DIR -syslog-listen :514 -trap-listen :162 -flow-listen :2055 -sflow-listen :6343 -syslog-tls-listen :6514 -cluster-listen :8434${JOIN:+ -join $JOIN -node-role $ROLE}
 # Licence key (Pro/Team) — or paste it in Admin → Licence:
 #TOPOLIGHT_LICENSE=SNTL1-...
+${JOIN:+# Join token (used on the first start only; the node remembers its membership afterwards)
+TOPOLIGHT_JOIN_TOKEN=$TOKEN}
 EOF
   chmod 0640 "$CONF_DIR/topolight.env"
   chown root:topolight "$CONF_DIR/topolight.env"
@@ -132,7 +152,11 @@ sleep 1
 if systemctl is-active --quiet topolight; then
   IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
   say "TopoLight $("$BIN_DIR/topolight" -version | awk '{print $2}') is running."
-  say "Open http://${IP:-<this-host>}:8432 and follow the setup wizard."
+  if [ -n "$JOIN" ]; then
+    say "This node joined the cluster at $JOIN as a $ROLE node; its console at http://${IP:-<this-host>}:8433 proxies to the leader."
+  else
+    say "Open http://${IP:-<this-host>}:8433 and follow the setup wizard."
+  fi
   say "Logs: journalctl -u topolight -f   ·   config: $CONF_DIR/topolight.env   ·   data: $DATA_DIR"
 else
   die "service failed to start — journalctl -u topolight -n 50"
