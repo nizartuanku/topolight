@@ -36,10 +36,17 @@ type snapshot struct {
 	Alerts      map[string]model.Alert         `json:"alerts"`    // open + acked; resolved archived
 	Maintenance map[string]model.Maintenance   `json:"maintenance"`
 	Users       map[string]model.User          `json:"users"`
+	Tokens      map[string]model.APIToken      `json:"tokens,omitempty"`
+	Probes      map[string]model.Probe         `json:"probes,omitempty"`
+	Reports     map[string]model.Report        `json:"reports,omitempty"`
 	Rules       map[string]model.Rule          `json:"rules"`
 	TopoVersion int                            `json:"topo_version"`
 	TopoSavedAt time.Time                      `json:"topo_saved_at"`
 	Layout      map[string][3]float64          `json:"layout"` // device id -> x,y,z
+	Routing     map[string]model.Routing       `json:"routing,omitempty"`
+	Integs      map[string]model.Integration   `json:"integrations,omitempty"`
+	Wireless    map[string]model.Wireless      `json:"wireless,omitempty"`
+	SDWAN       map[string][]model.SDWANLink   `json:"sdwan,omitempty"`
 }
 
 // Store is the in-memory model with persistence.
@@ -57,6 +64,7 @@ type Store struct {
 	evFile   *os.File
 	evDay    string
 	evWriter *bufio.Writer
+	readOnly bool
 }
 
 // Open loads (or initialises) the store in dir. An empty dir keeps everything
@@ -66,7 +74,7 @@ func Open(dir string) (*Store, error) {
 	st.s = snapshot{Version: 1, Sites: map[string]model.Site{}, Creds: map[string]model.Credential{},
 		Devices: map[string]model.Device{}, Interfaces: map[string]model.Interface{}, Links: map[string]model.Link{},
 		Neighbors: map[string][]model.NeighborObs{}, Alerts: map[string]model.Alert{}, Maintenance: map[string]model.Maintenance{},
-		Users: map[string]model.User{}, Rules: map[string]model.Rule{}, Layout: map[string][3]float64{}}
+		Users: map[string]model.User{}, Rules: map[string]model.Rule{}, Layout: map[string][3]float64{}, Routing: map[string]model.Routing{}, Integs: map[string]model.Integration{}, Wireless: map[string]model.Wireless{}, SDWAN: map[string][]model.SDWANLink{}}
 	st.s.Settings = model.Settings{InstanceName: "TopoLight", DefaultPoll: 60, DiscoveryEvery: 60, TopologyEvery: 30}
 	st.s.Notify = model.Notify{MinSeverity: model.SevMinor, GroupSeconds: 60, ResolvedToo: true, CriticalAlways: true}
 	if !st.memOnly {
@@ -82,6 +90,28 @@ func Open(dir string) (*Store, error) {
 		go st.flushLoop()
 	}
 	return st, nil
+}
+
+// OpenReadOnly loads state.json from dir but never writes back — a cluster
+// standby reads the leader's mirrored snapshot this way. Reload re-reads it.
+func OpenReadOnly(dir string) (*Store, error) {
+	st, err := Open("")
+	if err != nil {
+		return nil, err
+	}
+	st.dir, st.memOnly, st.readOnly = dir, true, true
+	if err := st.load(); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+// Reload re-reads state.json (read-only stores).
+func (st *Store) Reload() error {
+	if !st.readOnly {
+		return nil
+	}
+	return st.load()
 }
 
 func (st *Store) load() error {
@@ -124,6 +154,15 @@ func (st *Store) load() error {
 	if s.Maintenance == nil {
 		s.Maintenance = map[string]model.Maintenance{}
 	}
+	if s.Tokens == nil {
+		s.Tokens = map[string]model.APIToken{}
+	}
+	if s.Probes == nil {
+		s.Probes = map[string]model.Probe{}
+	}
+	if s.Reports == nil {
+		s.Reports = map[string]model.Report{}
+	}
 	if s.Users == nil {
 		s.Users = map[string]model.User{}
 	}
@@ -133,10 +172,24 @@ func (st *Store) load() error {
 	if s.Layout == nil {
 		s.Layout = map[string][3]float64{}
 	}
+	if s.Routing == nil {
+		s.Routing = map[string]model.Routing{}
+	}
+	if s.Integs == nil {
+		s.Integs = map[string]model.Integration{}
+	}
+	if s.Wireless == nil {
+		s.Wireless = map[string]model.Wireless{}
+	}
+	if s.SDWAN == nil {
+		s.SDWAN = map[string][]model.SDWANLink{}
+	}
 	if s.Settings.DefaultPoll == 0 {
 		s.Settings.DefaultPoll = 60
 	}
+	st.mu.Lock()
 	st.s = s
+	st.mu.Unlock()
 	return nil
 }
 
@@ -398,6 +451,9 @@ func (st *Store) DeleteDevice(id string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	delete(st.s.Devices, id)
+	delete(st.s.Routing, id)
+	delete(st.s.Wireless, id)
+	delete(st.s.SDWAN, id)
 	for k, i := range st.s.Interfaces {
 		if i.DeviceID == id {
 			delete(st.s.Interfaces, k)
@@ -514,6 +570,133 @@ func (st *Store) AllNeighbors() map[string][]model.NeighborObs {
 	out := make(map[string][]model.NeighborObs, len(st.s.Neighbors))
 	for k, v := range st.s.Neighbors {
 		out[k] = append([]model.NeighborObs(nil), v...)
+	}
+	return out
+}
+
+// ---- integrations, wireless, SD-WAN ----
+
+func (st *Store) Integrations() []model.Integration {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	out := make([]model.Integration, 0, len(st.s.Integs))
+	for _, i := range st.s.Integs {
+		out = append(out, i)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (st *Store) Integration(id string) (model.Integration, error) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	i, ok := st.s.Integs[id]
+	if !ok {
+		return model.Integration{}, ErrNotFound
+	}
+	return i, nil
+}
+
+func (st *Store) PutIntegration(i model.Integration) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.s.Integs == nil {
+		st.s.Integs = map[string]model.Integration{}
+	}
+	st.s.Integs[i.ID] = i
+	st.touch()
+}
+
+func (st *Store) DeleteIntegration(id string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	delete(st.s.Integs, id)
+	st.touch()
+}
+
+func (st *Store) Wireless(deviceID string) (model.Wireless, bool) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	w, ok := st.s.Wireless[deviceID]
+	return w, ok
+}
+
+func (st *Store) SetWireless(w model.Wireless) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.s.Wireless == nil {
+		st.s.Wireless = map[string]model.Wireless{}
+	}
+	st.s.Wireless[w.DeviceID] = w
+	st.touch()
+}
+
+func (st *Store) AllWireless() map[string]model.Wireless {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	out := make(map[string]model.Wireless, len(st.s.Wireless))
+	for k, v := range st.s.Wireless {
+		out[k] = v
+	}
+	return out
+}
+
+func (st *Store) SDWAN(deviceID string) []model.SDWANLink {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return append([]model.SDWANLink(nil), st.s.SDWAN[deviceID]...)
+}
+
+func (st *Store) SetSDWAN(deviceID string, links []model.SDWANLink) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.s.SDWAN == nil {
+		st.s.SDWAN = map[string][]model.SDWANLink{}
+	}
+	if len(links) == 0 {
+		delete(st.s.SDWAN, deviceID)
+	} else {
+		st.s.SDWAN[deviceID] = append([]model.SDWANLink(nil), links...)
+	}
+	st.touch()
+}
+
+func (st *Store) AllSDWAN() map[string][]model.SDWANLink {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	out := make(map[string][]model.SDWANLink, len(st.s.SDWAN))
+	for k, v := range st.s.SDWAN {
+		out[k] = append([]model.SDWANLink(nil), v...)
+	}
+	return out
+}
+
+// Routing returns the last routing/L2 walk of a device.
+func (st *Store) Routing(deviceID string) (model.Routing, bool) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	r, ok := st.s.Routing[deviceID]
+	return r, ok
+}
+
+// SetRouting stores a routing/L2 walk.
+func (st *Store) SetRouting(r model.Routing) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.s.Routing == nil {
+		st.s.Routing = map[string]model.Routing{}
+	}
+	st.s.Routing[r.DeviceID] = r
+	st.touch()
+}
+
+// AllRouting returns every device's routing state.
+func (st *Store) AllRouting() map[string]model.Routing {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	out := make(map[string]model.Routing, len(st.s.Routing))
+	for k, v := range st.s.Routing {
+		out[k] = v
 	}
 	return out
 }
@@ -779,6 +962,132 @@ func (st *Store) DeleteUser(id string) {
 	st.touch()
 }
 
+// ---- probes ----
+
+func (st *Store) Probes() []model.Probe {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	out := make([]model.Probe, 0, len(st.s.Probes))
+	for _, p := range st.s.Probes {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (st *Store) Probe(id string) (model.Probe, error) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	p, ok := st.s.Probes[id]
+	if !ok {
+		return model.Probe{}, ErrNotFound
+	}
+	return p, nil
+}
+
+func (st *Store) PutProbe(p model.Probe) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.s.Probes[p.ID] = p
+	st.touch()
+}
+
+func (st *Store) DeleteProbe(id string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	delete(st.s.Probes, id)
+	st.touch()
+}
+
+// ---- reports ----
+
+func (st *Store) Reports() []model.Report {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	out := make([]model.Report, 0, len(st.s.Reports))
+	for _, r := range st.s.Reports {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func (st *Store) Report(id string) (model.Report, error) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	r, ok := st.s.Reports[id]
+	if !ok {
+		return model.Report{}, ErrNotFound
+	}
+	return r, nil
+}
+
+func (st *Store) PutReport(r model.Report) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.s.Reports[r.ID] = r
+	st.touch()
+}
+
+func (st *Store) DeleteReport(id string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	delete(st.s.Reports, id)
+	st.touch()
+}
+
+// ---- API tokens ----
+
+func (st *Store) Tokens() []model.APIToken {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	out := make([]model.APIToken, 0, len(st.s.Tokens))
+	for _, t := range st.s.Tokens {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Created.Before(out[j].Created) })
+	return out
+}
+
+// TokenByHash finds a token by the sha256 of its secret.
+func (st *Store) TokenByHash(hash string) (model.APIToken, bool) {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	for _, t := range st.s.Tokens {
+		if t.Hash == hash {
+			return t, true
+		}
+	}
+	return model.APIToken{}, false
+}
+
+func (st *Store) PutToken(t model.APIToken) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.s.Tokens[t.ID] = t
+	st.touch()
+}
+
+func (st *Store) DeleteToken(id string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	delete(st.s.Tokens, id)
+	st.touch()
+}
+
+// TouchToken records use (at most once a minute to keep the snapshot quiet).
+func (st *Store) TouchToken(id string, now time.Time) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	t, ok := st.s.Tokens[id]
+	if !ok || now.Sub(t.LastUsed) < time.Minute {
+		return
+	}
+	t.LastUsed = now
+	st.s.Tokens[id] = t
+	st.touch()
+}
+
 // ---- rules ----
 
 func (st *Store) Rules() []model.Rule {
@@ -913,6 +1222,83 @@ func (st *Store) loadRecentEvents() error {
 		st.evRing = st.evRing[len(st.evRing)-st.evMax:]
 	}
 	return nil
+}
+
+// AlertsSince returns live alerts plus archived ones whose window touches
+// [from, now) — the material for availability and alert reports.
+func (st *Store) AlertsSince(from time.Time) []model.Alert {
+	out := st.Alerts()
+	seen := map[string]bool{}
+	for _, a := range out {
+		seen[a.ID] = true
+	}
+	if st.memOnly {
+		return out
+	}
+	names, _ := filepath.Glob(filepath.Join(st.dir, "alerts", "*.jsonl"))
+	sort.Strings(names)
+	for _, n := range names {
+		base := strings.TrimSuffix(filepath.Base(n), ".jsonl")
+		if d, err := time.Parse("2006-01-02", base); err == nil && d.Add(24*time.Hour).Before(from.Add(-24*time.Hour)) {
+			continue // archived before the window and cannot overlap it (archive happens after resolution)
+		}
+		f, err := os.Open(n)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		for sc.Scan() {
+			var a model.Alert
+			if json.Unmarshal(sc.Bytes(), &a) != nil || seen[a.ID] {
+				continue
+			}
+			if !a.ResolvedAt.IsZero() && a.ResolvedAt.Before(from) {
+				continue
+			}
+			seen[a.ID] = true
+			out = append(out, a)
+		}
+		f.Close()
+	}
+	return out
+}
+
+// EventsSince reads events from the journal for the window (oldest first),
+// optionally restricted to kinds.
+func (st *Store) EventsSince(from time.Time, kinds map[string]bool) []model.Event {
+	var out []model.Event
+	if st.memOnly {
+		for _, e := range st.RecentEvents("", 100000) {
+			if !e.TS.Before(from) && (kinds == nil || kinds[e.Kind]) {
+				out = append(out, e)
+			}
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].TS.Before(out[j].TS) })
+		return out
+	}
+	names, _ := filepath.Glob(filepath.Join(st.dir, "events", "*.jsonl"))
+	sort.Strings(names)
+	for _, n := range names {
+		base := strings.TrimSuffix(filepath.Base(n), ".jsonl")
+		if d, err := time.Parse("2006-01-02", base); err == nil && d.Add(24*time.Hour).Before(from) {
+			continue
+		}
+		f, err := os.Open(n)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		for sc.Scan() {
+			var e model.Event
+			if json.Unmarshal(sc.Bytes(), &e) == nil && !e.TS.Before(from) && (kinds == nil || kinds[e.Kind]) {
+				out = append(out, e)
+			}
+		}
+		f.Close()
+	}
+	return out
 }
 
 // PruneJournals deletes journal files older than keep.
