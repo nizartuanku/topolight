@@ -72,8 +72,9 @@ type Point struct {
 
 // Options configure retention.
 type Options struct {
-	RawDays       int // hours older than this are rolled up (default 30)
-	RetentionDays int // rollups older than this are deleted (default 183)
+	RawDays           int // hours older than this are rolled up (default 30)
+	RetentionDays     int // rollups older than this are deleted (default 183)
+	CheckpointMinutes int // how often the open hour is written to disk (default 5; 1 in a cluster)
 }
 
 type sample struct {
@@ -213,7 +214,11 @@ func (db *DB) loop() {
 		case <-t.C:
 			now := db.nowFunc()
 			db.rollover(now)
-			if now.Minute()%5 == 0 {
+			cp := db.opts.CheckpointMinutes
+			if cp <= 0 {
+				cp = 5
+			}
+			if now.Minute()%cp == 0 {
 				_ = db.Checkpoint()
 			}
 			if now.Minute() == 7 { // once an hour, off the rollover edge
