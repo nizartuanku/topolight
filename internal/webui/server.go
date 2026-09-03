@@ -292,6 +292,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/devices", s.require("viewer", s.listDevices))
 	m.HandleFunc("POST /api/devices", s.require("operator", s.addDevice))
 	m.HandleFunc("GET /api/devices/{id}", s.require("viewer", s.getDevice))
+	m.HandleFunc("GET /api/devices/{id}/health", s.require("viewer", s.getDeviceHealth))
 	m.HandleFunc("PUT /api/devices/{id}", s.require("operator", s.updateDevice))
 	m.HandleFunc("DELETE /api/devices/{id}", s.require("admin", func(w http.ResponseWriter, r *http.Request, _ auth.Session) {
 		id := r.PathValue("id")
@@ -943,6 +944,25 @@ func (s *Server) addDevice(w http.ResponseWriter, r *http.Request, _ auth.Sessio
 		return
 	}
 	writeJSON(w, 201, map[string]any{"device": dev})
+}
+
+// getDeviceHealth answers the topology hover card: one small JSON built
+// from the last samples already in the store (no SNMP, no history read).
+func (s *Server) getDeviceHealth(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	id := r.PathValue("id")
+	d, err := s.d.Store.Device(id)
+	if err != nil {
+		fail(w, 404, "device not found")
+		return
+	}
+	cause := ""
+	if d.Cause != "" {
+		if cd, err := s.d.Store.Device(d.Cause); err == nil {
+			cause = cd.Name
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, 200, deviceHealth(d, s.d.Store.Interfaces(id), s.d.Store.Alerts(), cause))
 }
 
 func (s *Server) getDevice(w http.ResponseWriter, r *http.Request, _ auth.Session) {
