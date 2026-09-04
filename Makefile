@@ -35,6 +35,7 @@ dist: vet test
 	  echo "building $$t"; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o $$d/topolight$$ext ./cmd/topolight || exit 1; \
 	  cp README.md LICENSE CHANGELOG.md $$d/; cp -r docs $$d/docs; rm -rf $$d/docs/img; \
+	  [ -n "$(ISSUER_PUBKEY)" ] && cp LICENSE-COMMERCIAL.md $$d/ || true; \
 	  [ $$os = linux ] && cp install.sh deploy/topolight.service $$d/ || true; \
 	  if [ $$os = windows ]; then (cd $(DIST) && zip -qr $$(basename $$d).zip $$(basename $$d)); else (cd $(DIST) && tar -czf $$(basename $$d).tar.gz $$(basename $$d)); fi; \
 	  rm -rf $$d; \

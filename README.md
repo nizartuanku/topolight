@@ -129,7 +129,9 @@ Bug reports with the `Admin → System` block pasted in are the most useful thin
 
 ## Licence
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+The source in this repository — and every binary you build from it, including the free edition on the Releases page — is **Apache License 2.0** (see [LICENSE](LICENSE)). That does not change.
+
+The **pre-built Pro and Team distribution** sold on Whop is a different artifact: the same code compiled with Hexward's issuer key, plus the licence key issued for your Instance ID. Those are delivered under the **Functional Source License 1.1 with an Apache 2.0 future licence** (FSL-1.1-ALv2) — internal use and professional services are fine, reselling or running it as a competing service is not, and the terms convert to Apache 2.0 two years after release. The full text ships as `LICENSE-COMMERCIAL.md` inside the paid tarball.
 
 ---
 
