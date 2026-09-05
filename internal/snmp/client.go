@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"hash"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,11 @@ const (
 	V2c Version = 1
 	V3  Version = 3
 )
+
+// DefaultPort is the well-known UDP port for SNMP agents. Callers may dial a
+// different one by putting host:port in Addr — lab agents and containerised
+// devices often sit on a high port because 161 needs privilege.
+const DefaultPort = 161
 
 // Client talks to one agent. It is safe for sequential use from one goroutine
 // and is cheap to create per device.
@@ -83,7 +89,7 @@ func (c *Client) dial() error {
 	}
 	addr := c.Addr
 	if !strings.Contains(addr, ":") || (strings.Count(addr, ":") > 1 && !strings.Contains(addr, "]")) {
-		addr = net.JoinHostPort(addr, "161")
+		addr = net.JoinHostPort(addr, strconv.Itoa(DefaultPort))
 	}
 	conn, err := net.DialTimeout("udp", addr, c.timeout())
 	if err != nil {
