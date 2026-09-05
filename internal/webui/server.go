@@ -1068,6 +1068,14 @@ func (s *Server) putCred(w http.ResponseWriter, r *http.Request, _ auth.Session)
 		writeJSON(w, 200, in.Redacted())
 		return
 	}
+	// SNMP credentials may name a UDP port; 0 keeps the well-known 161. The
+	// SSH-only fields are cleared so a credential switched from SSH to SNMP
+	// does not carry a stale key or enable password.
+	if in.Port < 0 || in.Port > 65535 {
+		fail(w, 400, "SNMP port must be between 1 and 65535")
+		return
+	}
+	in.PrivateKey, in.EnablePass, in.Password = "", "", ""
 	if in.Version == "2c" && in.Community == "" {
 		fail(w, 400, "community string required for v2c")
 		return
