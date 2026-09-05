@@ -334,21 +334,24 @@
       h('label', null, 'Private key (PEM, optional — used before the password)', h('textarea', { id: 'sk', rows: 3, placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----' }, c.private_key === '••••' ? '••••' : (c.private_key || ''))),
       h('p', { class: 'small muted' }, 'Read-only access is enough: TopoLight only runs "show running-config" (or the vendor equivalent). Assign the credential per site or per device.'));
     const v2 = h('div', { class: 'row' }, h('label', null, 'Community (read-only)', h('input', { id: 'cc', value: c.community || '', autocomplete: 'off' })));
+    const snmpPort = h('div', null,
+      h('div', { class: 'row' }, h('label', null, 'UDP port', h('input', { id: 'cpt', type: 'number', value: (c.kind === 'ssh' || c.kind === 'gnmi') ? 161 : (c.port || 161), min: 1, max: 65535 }))),
+      h('p', { class: 'small muted' }, 'Leave this at 161 unless the agent answers somewhere else. Lab simulators, containers and homelab gear often listen on a high port because 161 needs privilege. The port applies to every device that uses this credential — make a second credential for agents on a different one.'));
     const v3 = h('div', null,
       h('div', { class: 'row' }, h('label', null, 'User', h('input', { id: 'cu', value: c.user || '' })),
         h('label', null, 'Auth protocol', h('select', { id: 'ca' }, ...['sha', 'sha256', 'md5', ''].map(p => h('option', { value: p, selected: (c.auth_proto || 'sha') === p }, p || 'none')))),
         h('label', null, 'Auth password', h('input', { id: 'cap', type: 'password', value: c.auth_pass || '', autocomplete: 'new-password' }))),
       h('div', { class: 'row' }, h('label', null, 'Privacy protocol', h('select', { id: 'cp' }, ...['aes', 'des', ''].map(p => h('option', { value: p, selected: (c.priv_proto || 'aes') === p }, p || 'none')))),
         h('label', null, 'Privacy password', h('input', { id: 'cpp', type: 'password', value: c.priv_pass || '', autocomplete: 'new-password' }))));
-    function toggle() { const is3 = ver.value === '3', ssh = ver.value === 'ssh', gn = ver.value === 'gnmi'; v2.classList.toggle('hidden', is3 || ssh || gn); v3.classList.toggle('hidden', !is3); sshBox.classList.toggle('hidden', !ssh); gnmiBox.classList.toggle('hidden', !gn); }
-    f.append(h('div', { class: 'row' }, h('label', null, 'Name', h('input', { id: 'cn', value: c.name || '', required: true })), h('label', null, 'Type', ver)), v2, v3, sshBox, gnmiBox,
+    function toggle() { const is3 = ver.value === '3', ssh = ver.value === 'ssh', gn = ver.value === 'gnmi'; v2.classList.toggle('hidden', is3 || ssh || gn); v3.classList.toggle('hidden', !is3); snmpPort.classList.toggle('hidden', ssh || gn); sshBox.classList.toggle('hidden', !ssh); gnmiBox.classList.toggle('hidden', !gn); }
+    f.append(h('div', { class: 'row' }, h('label', null, 'Name', h('input', { id: 'cn', value: c.name || '', required: true })), h('label', null, 'Type', ver)), v2, v3, snmpPort, sshBox, gnmiBox,
       h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, submitLabel || 'Save')));
     toggle();
     f.onsubmit = e => {
       e.preventDefault();
       const out = ver.value === 'gnmi' ? { name: $('#cn', f).value.trim(), kind: 'gnmi', user: $('#gu', f).value.trim(), password: $('#gp', f).value, port: Number($('#gpt', f).value) || 6030, plaintext: !$('#gtls', f).checked, skip_verify: $('#gsv', f).checked }
         : ver.value === 'ssh' ? { name: $('#cn', f).value.trim(), kind: 'ssh', user: $('#su', f).value.trim(), password: $('#sp', f).value, enable_pass: $('#se', f).value, port: Number($('#spt', f).value) || 22, private_key: $('#sk', f).value.trim() }
-        : { name: $('#cn', f).value.trim(), version: ver.value, community: $('#cc', f).value, user: $('#cu', f).value.trim(), auth_proto: $('#ca', f).value, auth_pass: $('#cap', f).value, priv_proto: $('#cp', f).value, priv_pass: $('#cpp', f).value };
+        : { name: $('#cn', f).value.trim(), version: ver.value, community: $('#cc', f).value, user: $('#cu', f).value.trim(), auth_proto: $('#ca', f).value, auth_pass: $('#cap', f).value, priv_proto: $('#cp', f).value, priv_pass: $('#cpp', f).value, port: Number($('#cpt', f).value) || 161 };
       if (c.id) out.id = c.id;
       onSubmit(out);
     };
@@ -1344,7 +1347,7 @@
       } else if (tab === 'creds') {
         const creds = await get('/api/creds');
         const tb = h('tbody');
-        creds.forEach(c => tb.append(h('tr', null, h('td', null, h('b', null, c.name)), h('td', null, c.kind === 'ssh' ? 'SSH' : c.kind === 'gnmi' ? 'gNMI' : 'SNMP v' + c.version), h('td', { class: 'small muted' }, c.kind === 'gnmi' ? `${c.user} · port ${c.port || 6030} · ${c.plaintext ? 'plaintext' : 'TLS'}` : c.kind === 'ssh' ? `${c.user} · ${c.private_key ? 'key' : 'password'}${c.enable_pass ? ' + enable' : ''} · port ${c.port || 22}` : c.version === '3' ? `${c.user} · ${c.auth_proto || 'noauth'}/${c.priv_proto || 'nopriv'}` : 'community ••••'), h('td', null, c.kind === 'ssh' ? null : h('button', { class: 'btn sm', onclick: () => testCred(c) }, 'Test'), ' ', h('button', { class: 'btn sm', onclick: () => credDialog(c, render) }, 'Edit'), ' ', isAdmin ? h('button', { class: 'btn sm danger', onclick: async () => { await del('/api/creds/' + c.id); render(); } }, 'Delete') : null))));
+        creds.forEach(c => tb.append(h('tr', null, h('td', null, h('b', null, c.name)), h('td', null, c.kind === 'ssh' ? 'SSH' : c.kind === 'gnmi' ? 'gNMI' : 'SNMP v' + c.version), h('td', { class: 'small muted' }, c.kind === 'gnmi' ? `${c.user} · port ${c.port || 6030} · ${c.plaintext ? 'plaintext' : 'TLS'}` : c.kind === 'ssh' ? `${c.user} · ${c.private_key ? 'key' : 'password'}${c.enable_pass ? ' + enable' : ''} · port ${c.port || 22}` : (c.version === '3' ? `${c.user} · ${c.auth_proto || 'noauth'}/${c.priv_proto || 'nopriv'}` : 'community ••••') + (c.port && c.port !== 161 ? ` · udp ${c.port}` : '')), h('td', null, c.kind === 'ssh' ? null : h('button', { class: 'btn sm', onclick: () => testCred(c) }, 'Test'), ' ', h('button', { class: 'btn sm', onclick: () => credDialog(c, render) }, 'Edit'), ' ', isAdmin ? h('button', { class: 'btn sm danger', onclick: async () => { await del('/api/creds/' + c.id); render(); } }, 'Delete') : null))));
         body.append(h('div', { class: 'page-head' }, h('span', { class: 'sub' }, 'Read-only SNMP credentials (discovery tries the site’s credential first, then the others), SSH for configuration backup, gNMI for OpenConfig devices.'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: () => credDialog(null, render) }, '+ Credential')),
           h('div', { class: 'panel tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', null, h('tr', null, h('th', null, 'Name'), h('th', null, 'Version'), h('th', null, 'Details'), h('th', null, ''))), tb)));
       } else if (tab === 'notify') {
