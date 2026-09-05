@@ -123,7 +123,11 @@ type Credential struct {
 	Password   string `json:"password,omitempty"`
 	PrivateKey string `json:"private_key,omitempty"`
 	EnablePass string `json:"enable_pass,omitempty"`
-	Port       int    `json:"port,omitempty"`
+	// Port is the transport port for whichever kind this credential is:
+	// UDP for SNMP (0 or unset means the well-known 161), TCP for SSH (22)
+	// and gNMI (6030). Lab agents, containers and homelab gear frequently
+	// answer SNMP on a high port because 161 is privileged.
+	Port int `json:"port,omitempty"`
 	// gNMI (Kind == "gnmi"): User/Password as gRPC metadata, Port (default 6030),
 	// TLS on by default, SkipVerify for self-signed device certificates.
 	PlainText  bool `json:"plaintext,omitempty"` // h2c, no TLS
