@@ -82,7 +82,7 @@ TopoLight is **one process on one host**. The binary contains discovery, the ICM
 
 Idle access ports compress far better than the worst case; real estates typically land at a third of those figures. Admin → System shows the live number.
 
-**Network.** Outbound UDP/161 to devices; inbound UDP/514 + TCP/514 (syslog), UDP/162 (traps), UDP/2055 (NetFlow/IPFIX) and UDP/6343 (sFlow) from devices; TCP/8433 for the console (put TLS or a reverse proxy in front, or use `-tls-cert/-tls-key`). Linux amd64/arm64 for production; macOS and Windows builds for trying it on a laptop.
+**Network.** Outbound UDP/161 to devices (or the port set on the SNMP credential — lab and containerised agents often answer on a high one); inbound UDP/514 + TCP/514 (syslog), UDP/162 (traps), UDP/2055 (NetFlow/IPFIX) and UDP/6343 (sFlow) from devices; TCP/8433 for the console (put TLS or a reverse proxy in front, or use `-tls-cert/-tls-key`). Linux amd64/arm64 for production; macOS and Windows builds for trying it on a laptop.
 
 ### Deployment modes
 

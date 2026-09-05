@@ -6,7 +6,7 @@ Open the console (`http://<host>:8433`). Until an admin exists every request lan
 
 1. **Admin** — instance name, admin user, password (10+ characters). Create this immediately after install; the console is unprotected until it exists.
 2. **Site** — a name and the subnets or ranges to discover, one per line (`10.20.0.0/24`, `192.168.10.1-192.168.10.50`; largest range per line is /20).
-3. **SNMP** — one credential. SNMPv3 with SHA + AES is recommended; v2c read-only community works too. Read-only is all TopoLight ever needs.
+3. **SNMP** — one credential. SNMPv3 with SHA + AES is recommended; v2c read-only community works too. Read-only is all TopoLight ever needs. Leave *UDP port* at 161 unless your agents answer somewhere else.
 4. **Discovery** — runs immediately; devices appear as they answer, with vendor and model. Devices beyond your licence cap are listed as *not monitored*.
 5. **Done** — open the Overview.
 
@@ -41,7 +41,7 @@ How alerts open and close:
 
 - **Device down** — no ICMP *and* no SNMP for 3 consecutive cycles (Admin → Rules → `device_down`). Critical for core/router/firewall roles, major otherwise. Clears after 2 good cycles.
 - **Unreachable (suppressed)** — a device that stopped answering while its upstream (on the LLDP path to the site's core) was already down. Minor, folded under the upstream's alert, never notified separately.
-- **SNMP unreachable** — ping works, SNMP does not, for 3 cycles: credentials, ACL or agent problem.
+- **SNMP unreachable** — ping works, SNMP does not, for 3 cycles: credentials, ACL, agent problem — or the agent is not on udp/161. Check *UDP port* on the credential (Admin → Credentials): lab simulators, containers and homelab devices commonly listen on a high port, because binding 161 needs privilege. The port is a property of the credential, so devices on different ports each need their own; **Test** dials the same port the poller will.
 - **Thresholds** — CPU, memory, temperature, ICMP loss/latency, interface utilisation and errors, each with *enter* and *exit* values so a value hovering at the line does not flap. Utilisation escalates to major above 95%.
 - **Link down** — from a linkDown trap or a syslog line: the interface is marked down at once, a confirming poll is requested, and the alert clears when the device reports the port up again. Only *important* interfaces (uplinks, LLDP peers, anything you star) raise an alert; other ports just log an event.
 - **Flapping** — more than 5 state changes in 10 minutes (the `flapping` rule's cycles value); the device is held in *flapping* until it settles.

@@ -122,7 +122,7 @@ or `docker compose up -d` with the included `docker-compose.yml`. The container 
 
 | Direction | Port | Purpose |
 |---|---|---|
-| TopoLight → devices | UDP/161 | SNMP polling |
+| TopoLight → devices | UDP/161 | SNMP polling (or the *UDP port* set on the credential) |
 | TopoLight → devices | ICMP echo | reachability, RTT |
 | devices → TopoLight | UDP/514, TCP/514 | syslog |
 | devices → TopoLight | UDP/162 | SNMP traps / informs |
