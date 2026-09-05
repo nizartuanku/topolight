@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **SNMP credentials can name a UDP port.** Polling, discovery and the credential **Test** button dialled 161 with no way to say otherwise, so an agent on a high port was simply unreachable — the common case in labs, containers and homelabs, where binding 161 needs privilege. Admin → Credentials now has a *UDP port* field for v2c and v3 (`port` on the credential API, default 161); the credentials list shows it when it is not 161. Existing credentials are unaffected: an unset port still means 161. Changing the port rebuilds the device's client rather than leaving the old socket in place. Verified against a real net-snmp agent on udp/11161 over both v2c and v3.
+
 ## 0.4.1 — 2026-09-03
 
 - Licence keys are bound to an **Instance ID**. Every installation creates `<data>/instance.id` on first start (`TL-XXXX-XXXX-XXXX`, shown under Admin → Licence with a Copy button and checkout links); a key that names an instance is accepted only there. The file is mirrored across a cluster, so one cluster shares one Instance ID and a bound key keeps working after failover. Unbound keys still work anywhere. Enter the Instance ID at checkout — the key is issued for it automatically. `GET /api/license` and `/api/status` carry `instance`; `licgen issue/verify -instance`.
