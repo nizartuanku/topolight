@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -254,7 +255,7 @@ func (p *Poller) ClientFor(d model.Device) (*snmp.Client, error) {
 	if cred.IsGNMI() {
 		return nil, fmt.Errorf("credential %s is a gNMI credential, not SNMP", cred.Name)
 	}
-	fp := cred.ID + "|" + cred.Version + "|" + cred.Community + "|" + cred.User + "|" + cred.AuthProto + "|" + cred.AuthPass + "|" + cred.PrivProto + "|" + cred.PrivPass + "|" + d.IP
+	fp := cred.ID + "|" + cred.Version + "|" + cred.Community + "|" + cred.User + "|" + cred.AuthProto + "|" + cred.AuthPass + "|" + cred.PrivProto + "|" + cred.PrivPass + "|" + strconv.Itoa(SNMPPort(cred)) + "|" + d.IP
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if c := p.clients[d.ID]; c != nil && p.creds[d.ID] == fp {
@@ -269,9 +270,30 @@ func (p *Poller) ClientFor(d model.Device) (*snmp.Client, error) {
 	return c, nil
 }
 
+// SNMPPort returns the UDP port an SNMP credential polls on. Zero means the
+// credential never set one, which is the overwhelmingly common case, so the
+// well-known port answers for it.
+func SNMPPort(cred model.Credential) int {
+	if cred.Port > 0 && cred.Port <= 65535 {
+		return cred.Port
+	}
+	return snmp.DefaultPort
+}
+
+// SNMPAddr joins a device address with the credential's port. It is written
+// with net.JoinHostPort so a bare IPv6 address comes back bracketed, and it
+// leaves an address that already carries a port alone — a device may have been
+// entered as host:port before credentials grew a port of their own.
+func SNMPAddr(ip string, cred model.Credential) string {
+	if _, _, err := net.SplitHostPort(ip); err == nil {
+		return ip
+	}
+	return net.JoinHostPort(ip, strconv.Itoa(SNMPPort(cred)))
+}
+
 // NewClient builds an SNMP client from a credential.
 func NewClient(ip string, cred model.Credential) *snmp.Client {
-	c := &snmp.Client{Addr: ip, Timeout: 2 * time.Second, Retries: 1, MaxRep: 30}
+	c := &snmp.Client{Addr: SNMPAddr(ip, cred), Timeout: 2 * time.Second, Retries: 1, MaxRep: 30}
 	if cred.Version == "3" {
 		c.Version = snmp.V3
 		c.User, c.AuthProto, c.AuthPass, c.PrivProto, c.PrivPass = cred.User, cred.AuthProto, cred.AuthPass, cred.PrivProto, cred.PrivPass
