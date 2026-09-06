@@ -161,8 +161,10 @@ func TestClusterJoinElectFailoverMirror(t *testing.T) {
 		s := n1.node.Status()
 		return s.Assigned > 0 && s.MemberStat[n2.id.ID].Assigned > 0 && s.MemberStat[n3.id.ID].Assigned > 0 && s.Assigned+s.MemberStat[n2.id.ID].Assigned+s.MemberStat[n3.id.ID].Assigned == 30
 	})
-	// a pinned site goes to one node
-	n1.id.SitePins["site0"] = n2.id.ID
+	// a pinned site goes to one node. Set it through the node, not by writing
+	// the identity map: the leader is heartbeating in another goroutine and a
+	// bare map write raced with it (this test failed under -race at random).
+	n1.node.SetSitePin("site0", n2.id.ID)
 	waitFor(t, "pin", 3*time.Second, func() bool {
 		n1.node.mu.Lock()
 		defer n1.node.mu.Unlock()
