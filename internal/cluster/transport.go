@@ -269,7 +269,9 @@ func (n *Node) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		n.ID.Upsert(m)
 	}
 	if in.Pins != nil {
+		n.mu.Lock()
 		n.ID.SitePins = in.Pins
+		n.mu.Unlock()
 	}
 	_ = n.ID.Save()
 	if n.Hooks.OnAssign != nil {
@@ -331,7 +333,9 @@ func (n *Node) handleMembers(w http.ResponseWriter, r *http.Request) {
 		n.RemoveMember(in.Remove)
 	}
 	if in.Pins != nil {
+		n.mu.Lock()
 		n.ID.SitePins = in.Pins
+		n.mu.Unlock()
 		_ = n.ID.Save()
 	}
 	writeJSON(w, map[string]any{"ok": true})
