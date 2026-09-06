@@ -84,6 +84,8 @@ CGO_ENABLED=0 go build -o topolight ./cmd/topolight
 
 Tiers differ only in capacity and history. Every feature works in Free, so you can try all of it on a small network before paying for a bigger one.
 
+**Whop sells paid licences only.** Free: github.com/nizartuanku/topolight — this repository is the free edition, Apache-2.0, no time limit; nothing on Whop is free, so try it here first.
+
 Caps are enforced honestly: over the limit, discovery still lists the device but marks it *not monitored* and the API answers `402` with a readable message. The licence is an offline Ed25519 key — no phone-home, no account — issued for the **Instance ID** shown under Admin → Licence (one per installation; a cluster shares one). [Get a key on Whop](https://whop.com/nizar-tuanku/topolight?utm_source=github) (14-day trial).
 
 ## Honest limits
