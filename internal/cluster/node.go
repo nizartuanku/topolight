@@ -165,6 +165,34 @@ func (n *Node) Serve(ctx context.Context, listen string) error {
 }
 
 // Leader returns the current leader member, if known and alive.
+// SetSitePin pins a site to a node, or unpins it when nodeID is empty. Site
+// pins are read by reshard and shipped in every heartbeat, so they must only
+// ever be changed through here — writing n.ID.SitePins directly races with
+// both. Takes effect on the next reshard.
+func (n *Node) SetSitePin(site, nodeID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.ID.SitePins == nil {
+		n.ID.SitePins = map[string]string{}
+	}
+	if nodeID == "" {
+		delete(n.ID.SitePins, site)
+	} else {
+		n.ID.SitePins[site] = nodeID
+	}
+}
+
+// SitePins returns a copy of the current pins.
+func (n *Node) SitePins() map[string]string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	out := make(map[string]string, len(n.ID.SitePins))
+	for k, v := range n.ID.SitePins {
+		out[k] = v
+	}
+	return out
+}
+
 func (n *Node) Leader() (Member, bool) {
 	n.mu.Lock()
 	id := n.leaderID
@@ -404,7 +432,14 @@ func (n *Node) beat(ctx context.Context) {
 	n.mu.Lock()
 	term := n.term
 	members := n.ID.MemberList()
-	pins := n.ID.SitePins
+	// Copy, do not alias. The map goes into every heartbeat body and is
+	// marshalled outside this lock; handing out the live map made a pin change
+	// race with a heartbeat in flight. reshard already copies for the same
+	// reason.
+	pins := make(map[string]string, len(n.ID.SitePins))
+	for k, v := range n.ID.SitePins {
+		pins[k] = v
+	}
 	n.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, m := range members {
