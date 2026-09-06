@@ -973,7 +973,7 @@ func (s *Server) putSite(w http.ResponseWriter, r *http.Request, _ auth.Session)
 	if id == "" {
 		caps := s.caps()
 		if !license.Unlimited(caps.MaxSites) && len(s.d.Store.Sites()) >= caps.MaxSites {
-			fail(w, 402, fmt.Sprintf("the %s tier allows %d site(s) — upgrade for more", caps.Tier.Title(), caps.MaxSites))
+			fail(w, 402, fmt.Sprintf("the %s tier allows %d site(s) — Pro and Team: https://whop.com/nizar-tuanku/topolight?utm_source=app", caps.Tier.Title(), caps.MaxSites))
 			return
 		}
 		in.ID = model.NewID("site")
