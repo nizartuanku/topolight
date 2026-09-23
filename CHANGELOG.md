@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 — 2026-09-23
 
 - **SNMP credentials can name a UDP port.** Polling, discovery and the credential **Test** button dialled 161 with no way to say otherwise, so an agent on a high port was simply unreachable — the common case in labs, containers and homelabs, where binding 161 needs privilege. Admin → Credentials now has a *UDP port* field for v2c and v3 (`port` on the credential API, default 161); the credentials list shows it when it is not 161. Existing credentials are unaffected: an unset port still means 161. Changing the port rebuilds the device's client rather than leaving the old socket in place. Verified against a real net-snmp agent on udp/11161 over both v2c and v3.
 

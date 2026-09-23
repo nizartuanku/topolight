@@ -1,6 +1,6 @@
 # TopoLight — single static binary, standard library only.
-# Build:  docker build -t topolight:0.4.1 .
-# Run:    docker run -d -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp -p 6514:6514 -v topolight-data:/data topolight:0.4.1
+# Build:  docker build -t topolight:0.4.2 .
+# Run:    docker run -d -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp -p 6514:6514 -v topolight-data:/data topolight:0.4.2
 #
 # ISSUER_PUBKEY is intentionally empty: an image built from this public repo
 # is the Free edition. Pro/Team customers receive a binary with the issuer
