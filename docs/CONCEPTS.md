@@ -52,11 +52,11 @@ curl -fsSL https://raw.githubusercontent.com/nizartuanku/topolight/main/install.
 ```
 Or from the release tarball, verifying it first. TopoLight ships five platform builds and one SHA256SUMS covering all of them, so check the line for the file you actually downloaded:
 ```
-curl -LO https://github.com/nizartuanku/topolight/releases/latest/download/topolight_0.4.1_linux_amd64.tar.gz
+curl -LO https://github.com/nizartuanku/topolight/releases/latest/download/topolight_0.4.2_linux_amd64.tar.gz
 curl -LO https://github.com/nizartuanku/topolight/releases/latest/download/SHA256SUMS
-grep topolight_0.4.1_linux_amd64.tar.gz SHA256SUMS | sha256sum -c -
-tar xzf topolight_0.4.1_linux_amd64.tar.gz
-cd topolight_0.4.1_linux_amd64
+grep topolight_0.4.2_linux_amd64.tar.gz SHA256SUMS | sha256sum -c -
+tar xzf topolight_0.4.2_linux_amd64.tar.gz
+cd topolight_0.4.2_linux_amd64
 ./topolight
 ```
 Open port 8433 and follow the five-step wizard. The first devices are on the map in a few minutes. The free Apache-2.0 edition is on GitHub; Pro and Team are on Whop.
