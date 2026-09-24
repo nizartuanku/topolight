@@ -95,6 +95,7 @@
     state.user = state.status.user;
     state.sites = await get('/api/sites');
     if (!location.hash) location.hash = '#/overview';
+    loadAI();
     connectStream();
     route();
   }
@@ -364,7 +365,7 @@
     const err = h('div', { class: 'err' });
     const f = h('form', { class: 'form', onsubmit: async e => {
       e.preventDefault();
-      try { await post('/api/login', { User: $('#lu', f).value.trim(), Password: $('#lp', f).value }); state.status = await get('/api/status'); state.user = state.status.user; state.sites = await get('/api/sites'); $('#app').innerHTML = ''; if (!location.hash) location.hash = '#/overview'; connectStream(); route(); }
+      try { await post('/api/login', { User: $('#lu', f).value.trim(), Password: $('#lp', f).value }); state.status = await get('/api/status'); state.user = state.status.user; state.sites = await get('/api/sites'); $('#app').innerHTML = ''; if (!location.hash) location.hash = '#/overview'; loadAI(); connectStream(); route(); }
       catch (x) { err.textContent = x.message; }
     } },
       h('label', null, 'User name', h('input', { id: 'lu', autocomplete: 'username', required: true, autofocus: true })),
@@ -665,6 +666,46 @@
     return el;
   }
 
+  // ---------- AI Assist: "✨ Explain" on an alert ----------
+  // The state engine behind /api/alerts stays the only source of alerts and
+  // severity. This block only asks the optional hexward-ai sidecar to narrate
+  // an alert already on screen; if AI Assist is off or unreachable the button
+  // is hidden or a quiet note appears, and the alert itself never changes.
+  let aiEnabled = false;
+  const aiState = {}; // per alert id; survives the live-stream re-render of the detail panel
+  async function loadAI() { try { aiEnabled = !!(await get('/api/ai')).enabled; } catch (e) { aiEnabled = false; } }
+  function aiBlock(a) {
+    if (!aiEnabled) return null;
+    const box = h('div', { class: 'ai-box' });
+    renderAI(a, box);
+    return box;
+  }
+  function renderAI(a, box) {
+    box.innerHTML = '';
+    const st = aiState[a.id];
+    const busy = st && st.status === 'loading';
+    box.append(h('button', { class: 'btn sm aibtn', disabled: busy, onclick: () => explainAlert(a, box) }, busy ? 'Explaining…' : '✨ Explain'));
+    if (!st) return;
+    if (st.status === 'loading') { box.append(h('div', { class: 'ai-explain muted' }, 'Asking AI Assist to explain this alert. It runs on your own hardware and can take up to a minute.')); return; }
+    if (st.status !== 'done') { box.append(h('div', { class: 'ai-explain muted' }, (st.message || 'AI Assist is not reachable right now.') + ' The alert above is unaffected.')); return; }
+    box.append(h('div', { class: 'ai-explain' }, h('div', { class: 'ai-text' }, st.explanation),
+      (st.whatToVerify || []).length ? h('div', { class: 'ai-verify' }, h('b', null, 'What to verify:'), h('ul', null, ...st.whatToVerify.map(v => h('li', null, v)))) : null,
+      h('div', { class: 'ai-disclaimer' }, st.disclaimer)));
+  }
+  async function explainAlert(a, box) {
+    aiState[a.id] = { status: 'loading' };
+    renderAI(a, box);
+    try {
+      const d = await post('/api/alerts/' + encodeURIComponent(a.id) + '/explain');
+      aiState[a.id] = d.available
+        ? { status: 'done', explanation: d.explanation, whatToVerify: d.what_to_verify, disclaimer: d.disclaimer }
+        : { status: 'unavailable', message: d.reason || d.error };
+    } catch (e) {
+      aiState[a.id] = { status: 'error', message: 'AI Assist request failed.' };
+    }
+    if (box.isConnected) renderAI(a, box);
+  }
+
   // ---------- alerts ----------
   async function pageAlerts(main, params) {
     let filt = { state: 'active', severity: '', root: true };
@@ -706,6 +747,7 @@
           a.detail ? h('p', { class: 'muted', style: 'margin:10px 0' }, a.detail) : null,
           h('h3', null, 'Evidence'), h('div', { class: 'evidence', style: 'margin:6px 0 12px' }, ...(a.evidence || []).map(e => h('span', null, e))),
           a.ack_note ? h('p', { class: 'small' }, h('b', null, 'Note: '), a.ack_note) : null,
+          aiBlock(a),
           a.state !== 'resolved' ? h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' },
             a.state === 'open' ? h('button', { class: 'btn primary', onclick: () => ackDialog(a) }, 'Acknowledge') : null,
             h('button', { class: 'btn', onclick: async () => { await post('/api/alerts/' + a.id + '/resolve'); toast('Resolved', 'ok'); load(); } }, 'Resolve'),

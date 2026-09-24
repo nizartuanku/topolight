@@ -74,7 +74,7 @@ func Open(dir string) (*Store, error) {
 	st.s = snapshot{Version: 1, Sites: map[string]model.Site{}, Creds: map[string]model.Credential{},
 		Devices: map[string]model.Device{}, Interfaces: map[string]model.Interface{}, Links: map[string]model.Link{},
 		Neighbors: map[string][]model.NeighborObs{}, Alerts: map[string]model.Alert{}, Maintenance: map[string]model.Maintenance{},
-		Users: map[string]model.User{}, Rules: map[string]model.Rule{}, Layout: map[string][3]float64{}, Routing: map[string]model.Routing{}, Integs: map[string]model.Integration{}, Wireless: map[string]model.Wireless{}, SDWAN: map[string][]model.SDWANLink{}}
+		Users: map[string]model.User{}, Tokens: map[string]model.APIToken{}, Probes: map[string]model.Probe{}, Reports: map[string]model.Report{}, Rules: map[string]model.Rule{}, Layout: map[string][3]float64{}, Routing: map[string]model.Routing{}, Integs: map[string]model.Integration{}, Wireless: map[string]model.Wireless{}, SDWAN: map[string][]model.SDWANLink{}}
 	st.s.Settings = model.Settings{InstanceName: "TopoLight", DefaultPoll: 60, DiscoveryEvery: 60, TopologyEvery: 30}
 	st.s.Notify = model.Notify{MinSeverity: model.SevMinor, GroupSeconds: 60, ResolvedToo: true, CriticalAlways: true}
 	if !st.memOnly {

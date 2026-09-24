@@ -83,6 +83,10 @@ func main() {
 		clRole        = flag.String("node-role", "full", "role when joining: full (data copy, can lead) or collector (poll + forward only)")
 		clName        = flag.String("node-name", "", "node name shown in the cluster (default: hostname)")
 		clPromote     = flag.Bool("promote", false, "force this standby node to become leader (2-node clusters, or when the majority is lost for good), then exit")
+		aiURL         = flag.String("ai-assist-url", os.Getenv("TOPOLIGHT_AI_ASSIST_URL"), "optional hexward-ai sidecar URL for AI-narrated alert explanations, e.g. http://127.0.0.1:8435 (off when empty; or TOPOLIGHT_AI_ASSIST_URL)")
+		aiKeyFile     = flag.String("ai-assist-key-file", os.Getenv("TOPOLIGHT_AI_ASSIST_KEY_FILE"), "API key file for a dedicated AI host or your own OpenAI-compatible endpoint (Pro/Team; or TOPOLIGHT_AI_ASSIST_KEY_FILE)")
+		aiLang        = flag.String("ai-assist-lang", os.Getenv("TOPOLIGHT_AI_ASSIST_LANG"), "language of AI explanations: en (default) or id (or TOPOLIGHT_AI_ASSIST_LANG)")
+		aiNoThinking  = flag.Bool("ai-assist-no-thinking", os.Getenv("TOPOLIGHT_AI_ASSIST_NO_THINKING") == "1", "disable reasoning mode (Qwen3 enterprise profiles; or TOPOLIGHT_AI_ASSIST_NO_THINKING=1)")
 	)
 	flag.Parse()
 	if *showVer {
@@ -471,7 +475,15 @@ func main() {
 		},
 	}
 
-	srv := webui.New(webui.Deps{Store: st, DB: db, Logs: logs, Poller: pl, Discovery: disc, Topology: topo, Engine: eng, Notify: disp, Profiles: lib, Cluster: ctl,
+	aiAssist, err := webui.NewAIAssist(webui.AIConfig{URL: *aiURL, KeyFile: *aiKeyFile, Language: *aiLang, NoThinking: *aiNoThinking})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "topolight: "+err.Error())
+		os.Exit(2)
+	}
+	if aiAssist != nil {
+		log.Printf("AI Assist on — alert explanations from %s (language %s)", aiAssist.Endpoint, aiAssist.Language)
+	}
+	srv := webui.New(webui.Deps{Store: st, DB: db, Logs: logs, Poller: pl, Discovery: disc, Topology: topo, Engine: eng, Notify: disp, Profiles: lib, Cluster: ctl, AI: aiAssist,
 		Syslog: sys, Trap: tr, Flow: fc, FlowAddr: *flowAddr, SFlowAddr: *sflowAddr, Endpoints: eps, Probes: pr, Backup: bk, Reports: rp, Integ: ig, DataDir: dir, Started: time.Now(), Listen: *listen, SyslogAddr: *syslogAddr, SyslogTLSAddr: *syslogTLS, TrapAddr: *trapAddr, ICMPError: icmpErr,
 		License: func() license.State { return *licState },
 		SetLicense: func(k string) license.State {

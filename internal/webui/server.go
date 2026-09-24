@@ -78,6 +78,9 @@ type Deps struct {
 	Listen               string
 	SyslogAddr, TrapAddr string
 	ICMPError            string
+	// AI, when set, enables the optional AI Assist "✨ Explain" button on
+	// alerts (see ai.go). nil = off, the default.
+	AI *AIAssist
 }
 
 // Server is the HTTP handler set.
@@ -528,6 +531,7 @@ func (s *Server) routes() {
 
 	// alerts & events
 	m.HandleFunc("GET /api/alerts", s.require("viewer", s.listAlerts))
+	s.registerAI()
 	m.HandleFunc("POST /api/alerts/{id}/ack", s.require("operator", func(w http.ResponseWriter, r *http.Request, sess auth.Session) {
 		var in struct {
 			Note string `json:"note"`

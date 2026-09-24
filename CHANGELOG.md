@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **AI Assist (optional): an ✨ Explain button on every alert.** When TopoLight is started
+  with `-ai-assist-url`, a local [hexward-ai](https://github.com/nizartuanku/hexward-ai) sidecar
+  explains an alert in plain language and lists what to verify. The state engine remains the
+  only source of alerts and severity. Only one sanitised alert is sent: rule, title, target,
+  severity, state, the rule's description and thresholds, and safe facts from the alert page
+  (device name/IP/role/vendor/model/metrics, interface rates, probe type/target, durations,
+  counts). SNMP communities, credentials, sysDescr, configuration backups and log/trap payloads
+  are never read. Any AI failure shows a quiet note and changes nothing. Free edition: a
+  sidecar on the same host. Pro/Team: also a dedicated AI host or your own endpoint
+  (`-ai-assist-key-file`), checked per request. English or Bahasa Indonesia
+  (`-ai-assist-lang`). New endpoints `GET /api/ai` and `POST /api/alerts/{id}/explain`
+  (viewer role), covered by tests for: AI off, sign-in required, bad config, sanitising, tier
+  gating, sidecar down, and bad requests.
+- **Fixed: `-memory` mode could not store probes, API tokens or reports.** The in-memory store
+  never created those three tables, so the first `POST /api/probes`, `/api/tokens` or
+  `/api/reports` failed. On-disk data directories were not affected.
+
 ## 0.4.2 — 2026-09-23
 
 - **SNMP credentials can name a UDP port.** Polling, discovery and the credential **Test** button dialled 161 with no way to say otherwise, so an agent on a high port was simply unreachable — the common case in labs, containers and homelabs, where binding 161 needs privilege. Admin → Credentials now has a *UDP port* field for v2c and v3 (`port` on the credential API, default 161); the credentials list shows it when it is not 161. Existing credentials are unaffected: an unset port still means 161. Changing the port rebuilds the device's client rather than leaving the old socket in place. Verified against a real net-snmp agent on udp/11161 over both v2c and v3.

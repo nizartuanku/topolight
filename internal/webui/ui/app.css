@@ -234,3 +234,11 @@ pre.snippet.cfg{max-height:70vh;overflow:auto;font-size:12px;line-height:1.35}
 .diff .dl.add{background:color-mix(in srgb,var(--ok) 12%,transparent)}.diff .dl.add .mk{color:var(--ok)}
 .diff .dl.del{background:color-mix(in srgb,var(--major) 12%,transparent)}.diff .dl.del .mk{color:var(--major)}
 .diff .hunk{color:var(--faint);padding:4px 16px;border-top:1px dashed var(--border);border-bottom:1px dashed var(--border);margin:4px 0}
+/* AI Assist ("✨ Explain" on an alert): styled apart from evidence so it always reads as narration, never as a new fact from the engine */
+.ai-box{margin:10px 0 12px}
+.aibtn{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
+.ai-explain{margin-top:8px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--accent) 7%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border));font-size:13px;color:var(--muted)}
+.ai-explain.muted{background:var(--surface2);border-color:var(--border);font-style:italic}
+.ai-text{color:var(--text)}
+.ai-verify{margin-top:8px}.ai-verify ul{margin:4px 0 0 18px;padding:0}
+.ai-disclaimer{margin-top:8px;font-size:11.5px;color:var(--faint)}

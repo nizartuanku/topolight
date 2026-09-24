@@ -88,6 +88,52 @@ Tiers differ only in capacity and history. Every feature works in Free, so you c
 
 Caps are enforced honestly: over the limit, discovery still lists the device but marks it *not monitored* and the API answers `402` with a readable message. The licence is an offline Ed25519 key — no phone-home, no account — issued for the **Instance ID** shown under Admin → Licence (one per installation; a cluster shares one). [Get a key on Whop](https://whop.com/nizar-tuanku/topolight?utm_source=github) (14-day trial).
 
+## AI Assist (optional)
+
+TopoLight can explain an alert in plain language with a small language model that runs on
+your own hardware. It is off by default. Turn it on by starting a
+[hexward-ai](https://github.com/nizartuanku/hexward-ai) sidecar and pointing TopoLight at it:
+
+```sh
+topolight -ai-assist-url http://127.0.0.1:8435
+```
+
+Each alert then gets an **✨ Explain** button on the Alerts page. The model writes what the
+alert means and what to verify before you act. It also gets a fixed disclaimer.
+
+- **The state engine still decides.** The model receives one alert after TopoLight has raised
+  it. It cannot open, close, acknowledge or re-score an alert. If the sidecar is off, slow or
+  broken, the button shows a short note and nothing else changes.
+- **What leaves the process.** One alert: its rule, title, target (device name and IP, interface
+  or probe), severity, state, the rule's own description and thresholds, and safe facts the
+  alert page already shows — occurrences, how long it has been open, the device's role, vendor,
+  model and last metrics, the interface's rates, the probe's type and target, and the
+  `snmp 07:31:06`-style evidence markers. SNMP communities, SNMP/SSH credentials, sysDescr,
+  configuration backups, syslog and trap payloads are never read; for an alert raised from a
+  log or trap message only the alert title is sent. Keys that look like secrets (password,
+  token, secret, private, credential, cookie, session, signature and similar) are dropped by
+  the client as a second line. Nothing goes to the internet. The sidecar runs where you run it.
+- **Editions.** The free edition works with a sidecar on the same host. That is the `lab`
+  profile, SmolLM3-3B. Pro and Team can also use one dedicated AI host for several products,
+  or your own OpenAI-compatible endpoint, through `-ai-assist-key-file`. The recommended
+  profile there is `smb` (Phi-4-mini-instruct). Enterprise uses Qwen3 or your own endpoint.
+  The licence tier is checked on every request, so a key pasted in Admin → Licence takes
+  effect at once.
+- **Roles.** Any signed-in user (viewer and up) can ask for an explanation; it changes nothing.
+- **Language.** `-ai-assist-lang id` writes in Bahasa Indonesia. On the free SmolLM3 profile
+  Indonesian is experimental. English is recommended there.
+- **Honest limit.** Small local models sometimes add general background that is not in the
+  evidence. For example, they may name a well-known cause or protocol behaviour, and that
+  background can be wrong. Treat the explanation as a starting point. The alert, its evidence
+  and the rule text remain the record, which is why every explanation carries the "verify
+  against raw findings" line.
+- **Speed.** On a CPU-only machine an explanation takes about 15–50 seconds, depending on the
+  model. Measurements are in hexward-ai's `docs/TIERS.md`.
+
+Environment equivalents: `TOPOLIGHT_AI_ASSIST_URL`, `TOPOLIGHT_AI_ASSIST_KEY_FILE`,
+`TOPOLIGHT_AI_ASSIST_LANG`, `TOPOLIGHT_AI_ASSIST_NO_THINKING=1`. API: `GET /api/ai` reports
+whether it is on; `POST /api/alerts/{id}/explain` returns the explanation.
+
 ## Honest limits
 
 Read these before you rely on it.
