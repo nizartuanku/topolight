@@ -1,0 +1,69 @@
+# Builds the free-edition release with `make dist` and publishes it on GitHub.
+#
+# Trigger:  git tag vX.Y.Z && git push origin vX.Y.Z
+#
+# TopoLight is standard-library only (CGO off), so the archive is the same
+# `make dist` output documented in docs/INSTALL.md, limited to linux/amd64 as
+# in earlier releases. No ISSUER_PUBKEY here: this is always the Free edition.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check the tag matches internal/version
+        run: |
+          v=$(sed -n 's/.*Version *= *"\(.*\)".*/\1/p' internal/version/version.go)
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != version $v"; exit 1; }
+
+      - name: Build (vet + race tests run inside make dist)
+        run: make dist TARGETS=linux/amd64
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME#v}"
+          mkdir -p /tmp/smoke && tar -C /tmp/smoke -xzf "dist/topolight_${v}_linux_amd64.tar.gz"
+          { /tmp/smoke/topolight_${v}_linux_amd64/topolight -h 2>&1 || true; } | grep -q -- '-ai-assist-url'
+          echo "binary runs and exposes -ai-assist-url"
+
+      - name: Release notes
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME#v}"
+          a="topolight_${v}_linux_amd64.tar.gz"
+          awk -v h="## ${v}" 'index($0,h)==1{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
+          {
+            echo
+            echo "### Install (free edition, Linux x86-64)"
+            echo
+            echo '```sh'
+            echo "curl -LO https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${a}"
+            echo "curl -LO https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/SHA256SUMS"
+            echo "sha256sum -c SHA256SUMS"
+            echo "tar xzf ${a} && cd topolight_${v}_linux_amd64"
+            echo '```'
+            echo
+            echo "AI Assist is optional and off by default: see the \"AI Assist (optional)\" section of the README and https://github.com/nizartuanku/hexward-ai."
+          } >> notes.md
+          cat notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --title "TopoLight ${v}" --notes-file notes.md --latest

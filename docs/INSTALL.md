@@ -58,14 +58,14 @@ curl -fsSL https://raw.githubusercontent.com/nizartuanku/topolight/main/install.
 
 The script downloads the release tarball for your CPU, verifies it against `SHA256SUMS`, installs `/usr/local/bin/topolight`, creates a `topolight` system user, grants the binary `cap_net_raw` (ICMP) and `cap_net_bind_service` (ports 514/162), writes `/etc/topolight/topolight.env` and a hardened systemd unit, and starts the service. Re-running it upgrades the binary and keeps `/var/lib/topolight`.
 
-Offline host: download the tarball on another machine and run `TOPOLIGHT_TARBALL=/path/topolight_0.4.2_linux_amd64.tar.gz sudo sh install.sh`.
+Offline host: download the tarball on another machine and run `TOPOLIGHT_TARBALL=/path/topolight_0.4.3_linux_amd64.tar.gz sudo sh install.sh`.
 
 Then open `http://<host>:8433` and follow the wizard. The first request creates the admin user — do this straight away.
 
 ## 3. Install by hand
 
 ```sh
-tar -xzf topolight_0.4.2_linux_amd64.tar.gz && cd topolight_0.4.2_linux_amd64
+tar -xzf topolight_0.4.3_linux_amd64.tar.gz && cd topolight_0.4.3_linux_amd64
 sha256sum -c ../SHA256SUMS --ignore-missing
 sudo install -m 0755 topolight /usr/local/bin/topolight
 sudo setcap 'cap_net_raw,cap_net_bind_service=+ep' /usr/local/bin/topolight   # ICMP + ports < 1024 without root
@@ -79,7 +79,7 @@ Without `setcap`, either run as root (not recommended), allow unprivileged ICMP 
 ## 4. Docker
 
 ```sh
-docker build -t topolight:0.4.2 .
+docker build -t topolight:0.4.3 .
 docker run -d --name topolight --restart unless-stopped \
   -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp -p 6514:6514 \
   -v topolight-data:/data topolight:0.4.2

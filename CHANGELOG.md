@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.3 — 2026-09-24
 
 - **AI Assist (optional): an ✨ Explain button on every alert.** When TopoLight is started
   with `-ai-assist-url`, a local [hexward-ai](https://github.com/nizartuanku/hexward-ai) sidecar
