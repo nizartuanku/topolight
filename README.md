@@ -120,8 +120,9 @@ alert means and what to verify before you act. It also gets a fixed disclaimer.
   The licence tier is checked on every request, so a key pasted in Admin → Licence takes
   effect at once.
 - **Roles.** Any signed-in user (viewer and up) can ask for an explanation; it changes nothing.
-- **Language.** `-ai-assist-lang id` writes in Bahasa Indonesia. On the free SmolLM3 profile
-  Indonesian is experimental. English is recommended there.
+- **Language.** English is the supported language in this release. `-ai-assist-lang id`
+  (Bahasa Indonesia) remains as an unsupported preview. More languages will be added based on
+  demand.
 - **Honest limit.** Small local models sometimes add general background that is not in the
   evidence. For example, they may name a well-known cause or protocol behaviour, and that
   background can be wrong. Treat the explanation as a starting point. The alert, its evidence
@@ -169,7 +170,7 @@ Security notes: the console needs a login from the first request; passwords are 
 - [docs/DATASHEET.md](docs/DATASHEET.md) — protocols collected, features, editions, server requirements, deployment modes, comparison, roadmap ([PDF](docs/TopoLight-0.4-datasheet.pdf))
 - [docs/INSTALL.md](docs/INSTALL.md) — install, upgrade, systemd, Docker, ports, TLS, backups
 - [docs/USER-GUIDE.md](docs/USER-GUIDE.md) — wizard, discovery, topology, alerts, rules, notifications, profiles, licence
-- [docs/SPEC-v0.md](docs/SPEC-v0.md) — scope and architecture of v0.1 ([Bahasa Indonesia](docs/SPEC-v0.ID.md))
+- [docs/SPEC-v0.md](docs/SPEC-v0.md) — scope and architecture of v0.1
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## Contributing
