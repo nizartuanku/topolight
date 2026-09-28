@@ -51,7 +51,7 @@ docker build -t topolight:0.4.3 .
 docker run -d --name topolight \
   -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp \
   -v topolight-data:/data \
-  topolight:0.4.2
+  topolight:0.4.3
 ```
 
 Or download the tarball from [Releases](https://github.com/nizartuanku/topolight/releases), verify `SHA256SUMS`, and run `./topolight` — everything is flags, `topolight -h` lists them. See [docs/INSTALL.md](docs/INSTALL.md) for systemd, TLS, ports and unprivileged ICMP.
