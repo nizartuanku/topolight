@@ -1,9 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.4.4 — 2026-09-29
 
 - Docs: English is the supported AI Assist language in this release. Bahasa Indonesia
   (`-ai-assist-lang id`) is an unsupported preview; more languages will be added based on demand.
+- Fixed: the Docker section named a different tag in `docker run` than the one it had just
+  built with `docker build` (`topolight:0.4.2` vs `topolight:0.4.3`), so running the two
+  commands in order failed with "Unable to find image ... locally" / a stale image. The
+  build and run tags, the Dockerfile header comment, and `docker-compose.yml` now all name
+  the same tag as this release (QC-058).
 
 ## 0.4.3 — 2026-09-24
 
