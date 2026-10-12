@@ -31,6 +31,8 @@ TopoLight watches your switches, routers, firewalls and access points over ICMP 
 - **Storage** — embedded: a JSON snapshot for inventory/topology/alerts, JSONL journals for events and logs (daily, gzip), and a small purpose-built time-series store (deflated chunks; 60-second raw for 7 days, 5-minute rollups to the retention limit). Nothing to install, nothing to tune.
 - **Setup** — a five-step wizard gets the first devices on the map in a few minutes; per-vendor config snippets (SNMP, LLDP, syslog, trap) are generated for you.
 
+**See the actual output** — [a real monitoring run, deployed and exported](docs/samples/): one real device polled over SNMP plus four real synthetic probes, two of them deliberately pointed at things that fail.
+
 ## Quick start
 
 Linux (amd64/arm64):

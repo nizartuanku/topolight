@@ -1,0 +1,119 @@
+{
+  "names": {},
+  "probes": [
+    {
+      "id": "prb_1a12de00399007",
+      "name": "badssl-https",
+      "type": "http",
+      "target": "https://badssl.com/",
+      "every": 15,
+      "timeout": 8,
+      "enabled": true,
+      "created": "2026-10-12T09:10:18.137592216+07:00"
+    },
+    {
+      "id": "prb_1a12de003cc00a",
+      "name": "badssl-tcp443",
+      "type": "tcp",
+      "target": "badssl.com:443",
+      "every": 15,
+      "timeout": 8,
+      "enabled": true,
+      "created": "2026-10-12T09:10:18.188686511+07:00"
+    },
+    {
+      "id": "prb_1a12de003ab008",
+      "name": "expired-cert-check",
+      "type": "tls",
+      "target": "expired.badssl.com:443",
+      "every": 15,
+      "timeout": 8,
+      "enabled": true,
+      "created": "2026-10-12T09:10:18.155209797+07:00"
+    },
+    {
+      "id": "prb_1a12de003bc009",
+      "name": "nxdomain-check",
+      "type": "dns",
+      "target": "hexward-sample-nxdomain.invalid",
+      "every": 15,
+      "timeout": 8,
+      "enabled": true,
+      "created": "2026-10-12T09:10:18.172101381+07:00"
+    }
+  ],
+  "summaries": {
+    "prb_1a12de00399007": {
+      "last": {
+        "probe_id": "prb_1a12de00399007",
+        "ts": "2026-10-12T09:12:11.589249764+07:00",
+        "ok": true,
+        "ms": 1030.32,
+        "detail": "HTTP 200",
+        "attrs": {
+          "bytes": "11673",
+          "cert_days": "77",
+          "status": "200"
+        }
+      },
+      "fails": 0,
+      "uptime_pct": 100,
+      "avg_ms": 987.6571250000001
+    },
+    "prb_1a12de003ab008": {
+      "last": {
+        "probe_id": "prb_1a12de003ab008",
+        "ts": "2026-10-12T09:12:10.590328275+07:00",
+        "ok": false,
+        "ms": 742.778,
+        "detail": "certificate expired on 2015-04-12",
+        "attrs": {
+          "cert_days": "-4200",
+          "chain": "x509: certificate has expired or is not yet valid: current time 2026-10-12T09:12:11+07:00 is after 2015-04-12T23:59:59Z",
+          "issuer": "COMODO RSA Domain Validation Secure Server CA",
+          "not_after": "2015-04-12",
+          "subject": "*.badssl.com",
+          "version": "TLS 1.2"
+        }
+      },
+      "fails": 9,
+      "uptime_pct": 0,
+      "avg_ms": 0
+    },
+    "prb_1a12de003bc009": {
+      "last": {
+        "probe_id": "prb_1a12de003bc009",
+        "ts": "2026-10-12T09:12:10.590261458+07:00",
+        "ok": false,
+        "ms": 1.583,
+        "detail": "lookup hexward-sample-nxdomain.invalid on 127.0.0.53:53: no such host"
+      },
+      "fails": 9,
+      "uptime_pct": 0,
+      "avg_ms": 0
+    },
+    "prb_1a12de003cc00a": {
+      "last": {
+        "probe_id": "prb_1a12de003cc00a",
+        "ts": "2026-10-12T09:12:10.590254831+07:00",
+        "ok": true,
+        "ms": 340.339,
+        "attrs": {
+          "remote": "104.154.89.105:443"
+        }
+      },
+      "fails": 0,
+      "uptime_pct": 100,
+      "avg_ms": 296.491875
+    }
+  },
+  "traceroute": false,
+  "types": [
+    "tcp",
+    "http",
+    "dns",
+    "tls",
+    "ping",
+    "traceroute"
+  ]
+}

@@ -1,0 +1,111 @@
+{
+  "alerts": [
+    {
+      "id": "alr_1a12de046f8010",
+      "rule": "probe_failed",
+      "severity": "major",
+      "state": "open",
+      "domain": "network",
+      "site_id": "",
+      "device_id": "",
+      "object": "prb_1a12de003ab008",
+      "title": "expired-cert-check (tls expired.badssl.com:443) failing: certificate expired on 2015-04-12",
+      "detail": "expired-cert-check (tls expired.badssl.com:443) failing: certificate expired on 2015-04-12",
+      "opened_at": "2026-10-12T09:10:35.38421583+07:00",
+      "updated_at": "2026-10-12T09:10:35.38421583+07:00",
+      "resolved_at": "0001-01-01T00:00:00Z",
+      "occurrences": 1,
+      "children": 0,
+      "evidence": [
+        "probe 09:10:35"
+      ],
+      "dedup_key": "probe_failed:prb_1a12de003ab008",
+      "notified": true
+    },
+    {
+      "id": "alr_1a12de043de00e",
+      "rule": "probe_failed",
+      "severity": "major",
+      "state": "open",
+      "domain": "network",
+      "site_id": "",
+      "device_id": "",
+      "object": "prb_1a12de003bc009",
+      "title": "nxdomain-check (dns hexward-sample-nxdomain.invalid) failing: lookup hexward-sample-nxdomain.invalid on 127.0.0.53:53: n\u2026",
+      "detail": "nxdomain-check (dns hexward-sample-nxdomain.invalid) failing: lookup hexward-sample-nxdomain.invalid on 127.0.0.53:53: no such host",
+      "opened_at": "2026-10-12T09:10:34.590605534+07:00",
+      "updated_at": "2026-10-12T09:10:34.590605534+07:00",
+      "resolved_at": "0001-01-01T00:00:00Z",
+      "occurrences": 1,
+      "children": 0,
+      "evidence": [
+        "probe 09:10:34"
+      ],
+      "dedup_key": "probe_failed:prb_1a12de003bc009",
+      "notified": true
+    },
+    {
+      "id": "alr_1a12de0086800c",
+      "rule": "tls_expiring",
+      "severity": "minor",
+      "state": "open",
+      "domain": "network",
+      "site_id": "",
+      "device_id": "",
+      "object": "prb_1a12de003ab008",
+      "title": "expired-cert-check: certificate for *.badssl.com expires in -4200 days (2015-04-12)",
+      "detail": "expired-cert-check: certificate for *.badssl.com expires in -4200 days (2015-04-12)",
+      "opened_at": "2026-10-12T09:10:19.366837508+07:00",
+      "updated_at": "2026-10-12T09:10:19.366837508+07:00",
+      "resolved_at": "0001-01-01T00:00:00Z",
+      "occurrences": 1,
+      "children": 0,
+      "evidence": [
+        "probe 09:10:19"
+      ],
+      "dedup_key": "tls_expiring:prb_1a12de003ab008",
+      "notified": true
+    }
+  ],
+  "devices": [
+    {
+      "id": "dev_1a12ddfdc45004",
+      "site_id": "site_1a12ddf879b002",
+      "name": "DevNet (Hexward lab VM)",
+      "ip": "192.168.1.111",
+      "domain": "network",
+      "role": "server",
+      "vendor": "Linux (net-snmp)",
+      "sys_object_id": "1.3.6.1.4.1.8072.3.2.10",
+      "sys_descr": "Linux DevNet 6.8.0-146-generic #146-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep  3 16:12:30 UTC 2026 x86_64",
+      "location": "Sitting on the Dock of the Bay",
+      "profile_id": "net-snmp",
+      "cred_id": "cred_1a12ddfa9f0003",
+      "poll_every": 60,
+      "monitored": true,
+      "status": "up",
+      "status_since": "2026-10-12T09:10:08.589377505+07:00",
+      "last_poll": "2026-10-12T09:12:10.590341567+07:00",
+      "last_seen": "2026-10-12T09:12:10.590341567+07:00",
+      "uptime_s": 591175,
+      "created": "2026-10-12T09:10:08.06997261+07:00",
+      "snmp_ok": true,
+      "metrics": {
+        "loss_pct": 0,
+        "rtt_ms": 0
+      }
+    }
+  ],
+  "exported_at": "2026-10-12T09:12:20.693608077+07:00",
+  "interfaces": [],
+  "links": [],
+  "sites": [
+    {
+      "id": "site_1a12ddf879b002",
+      "name": "DevNet Lab",
+      "subnets": null,
+      "created": "2026-10-12T09:09:46.395524005+07:00"
+    }
+  ],
+  "version": "0.4.4"
+}

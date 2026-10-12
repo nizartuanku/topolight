@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Docs: `docs/samples/` added — a real monitoring run against one SNMP device (the lab host itself) and four real synthetic probes, free edition, exported as the API returned it.
+
 ## 0.4.4 — 2026-09-29
 
 - Docs: English is the supported AI Assist language in this release. Bahasa Indonesia
