@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.4.5 — 2026-10-28
+
+- **SIEM export, in every edition (Free included).** Alerts that open and clear are sent as
+  [Hexward Finding Schema](https://github.com/nizartuanku/hexward-core) v1 events to an NDJSON
+  file (`-export-file`), Splunk HEC (`-hec-url`, `-hec-token-file`), syslog out as HFS JSON or
+  CEF over udp, tcp or verified tls (`-export-syslog`, `-export-syslog-format`,
+  `-export-syslog-network`, `-export-syslog-rfc`, `-export-syslog-ca-file`) and/or a webhook
+  (`-export-webhook`, `-export-webhook-secret-file`). Root causes only, before quiet hours and
+  grouping; the affected device is `device_ip`, never `src_ip`; export has its own queue and
+  never delays a notification. `-export-evidence redacted|none`. Works with
+  [hexward-wazuh](https://github.com/nizartuanku/hexward-wazuh) and
+  [TA-hexward](https://github.com/nizartuanku/TA-hexward).
 
 - Docs: `docs/samples/` added — a real monitoring run against one SNMP device (the lab host itself) and four real synthetic probes, free edition, exported as the API returned it.
 

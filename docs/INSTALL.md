@@ -140,7 +140,7 @@ Nothing else. TopoLight never contacts the internet on its own — the Meraki in
 
 ## 6a. Building from source
 
-`go build ./cmd/topolight` needs Go 1.24+ and network access for the one external module (golang.org/x/crypto for SSH backups, fetched through the GitHub mirror named in `go.mod`); everything else is the standard library.
+`go build ./cmd/topolight` needs Go 1.24+ and network access for two external modules: golang.org/x/crypto for SSH backups (fetched through the GitHub mirror named in `go.mod`) and Hexward's own github.com/nizartuanku/hexward-core for SIEM export (itself standard library only); everything else is the standard library.
 
 ## 7. TLS
 

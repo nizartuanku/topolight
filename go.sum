@@ -4,3 +4,5 @@ github.com/golang/sys v0.34.0 h1:hAXLXIPulCqkT1T6t+fBNkAEoyJRHpHhvhZYDZasD+A=
 github.com/golang/sys v0.34.0/go.mod h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k=
 github.com/golang/term v0.33.0 h1:fi91rBL8jPO8TH8HOmIjEZ2c15qp5Z+oQ11mafpnrrY=
 github.com/golang/term v0.33.0/go.mod h1:s18+ql9tYWp1IfpV9DmCtQDDSRBUjKaw9M1eAv5UeF0=
+github.com/nizartuanku/hexward-core v0.1.0 h1:PsSiv3iewsOttueXjjI0KKzuzeAclgd8D/6ijURrZbg=
+github.com/nizartuanku/hexward-core v0.1.0/go.mod h1:SdyLqaUcvQkB+RziEZx0ET1jSdGQp6ifMh7HpXLMZbQ=

@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nizartuanku/hexward-core/hfs"
+
 	"github.com/nizartuanku/topolight/internal/backup"
 	"github.com/nizartuanku/topolight/internal/cluster"
 	"github.com/nizartuanku/topolight/internal/discovery"
@@ -35,6 +37,7 @@ import (
 	"github.com/nizartuanku/topolight/internal/profile"
 	"github.com/nizartuanku/topolight/internal/report"
 	"github.com/nizartuanku/topolight/internal/selfcert"
+	"github.com/nizartuanku/topolight/internal/siemexport"
 	"github.com/nizartuanku/topolight/internal/state"
 	"github.com/nizartuanku/topolight/internal/store"
 	"github.com/nizartuanku/topolight/internal/syslog"
@@ -88,6 +91,7 @@ func main() {
 		aiLang        = flag.String("ai-assist-lang", os.Getenv("TOPOLIGHT_AI_ASSIST_LANG"), "language of AI explanations: en (default) or id (or TOPOLIGHT_AI_ASSIST_LANG)")
 		aiNoThinking  = flag.Bool("ai-assist-no-thinking", os.Getenv("TOPOLIGHT_AI_ASSIST_NO_THINKING") == "1", "disable reasoning mode (Qwen3 enterprise profiles; or TOPOLIGHT_AI_ASSIST_NO_THINKING=1)")
 	)
+	exportFlags := siemexport.Register(flag.CommandLine)
 	flag.Parse()
 	if *showVer {
 		fmt.Printf("%s %s\n", version.Product, version.Version)
@@ -245,6 +249,15 @@ func main() {
 	disp.Telegram = notify.Telegram{Token: *tgToken}
 	rp := report.NewRunner(report.Deps{Store: st, DB: db, Backup: cfgStore, Flow: flows, Endpoints: eps, Probes: pr, Instance: st.Settings().InstanceName}, disp, dir)
 	disp.WebhookSecret = *whSecret
+	exportHost, _ := os.Hostname()
+	exporter, err := exportFlags.Build(hfs.Meta{Product: "topolight", Version: version.Version, Host: exportHost})
+	if err != nil {
+		log.Fatalf("SIEM export: %v", err)
+	}
+	if exporter != nil {
+		exporter.Dir = st
+		log.Printf("SIEM export on — alerts go to %s as Hexward Finding Schema v1", strings.Join(exporter.Names(), ", "))
+	}
 	disp.ConsoleURL = *consoleURL
 	if disp.ConsoleURL == "" {
 		disp.ConsoleURL = st.Settings().ConsoleURL
@@ -304,7 +317,14 @@ func main() {
 			}
 		}
 	}()
-	go disp.Run(ctx, eng.Notify)
+	if exporter != nil {
+		// The SIEM sees every alert the dispatcher sees, and never slows it.
+		toDispatch := make(chan model.Alert, cap(eng.Notify))
+		go exporter.Tee(ctx, eng.Notify, toDispatch)
+		go disp.Run(ctx, toDispatch)
+	} else {
+		go disp.Run(ctx, eng.Notify)
+	}
 	if *syslogAddr != "" {
 		go func() {
 			if err := sys.ListenAndServe(ctx, *syslogAddr); err != nil {

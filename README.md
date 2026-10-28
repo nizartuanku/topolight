@@ -49,7 +49,7 @@ The installer downloads the release tarball, verifies it against `SHA256SUMS`, c
 Docker (build the image from this repo — a published `hexward/topolight` image follows once it has been through the same checks):
 
 ```sh
-docker build -t topolight:0.4.4 .
+docker build -t topolight:0.4.5 .
 docker run -d --name topolight \
   -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp \
   -v topolight-data:/data \
@@ -58,7 +58,7 @@ docker run -d --name topolight \
 
 Or download the tarball from [Releases](https://github.com/nizartuanku/topolight/releases), verify `SHA256SUMS`, and run `./topolight` — everything is flags, `topolight -h` lists them. See [docs/INSTALL.md](docs/INSTALL.md) for systemd, TLS, ports and unprivileged ICMP.
 
-Build from source (Go 1.24, no dependencies beyond the standard library):
+Build from source (Go 1.24; two external modules — golang.org/x/crypto for SSH backups, and Hexward's own [hexward-core](https://github.com/nizartuanku/hexward-core) for SIEM export, itself standard library only):
 
 ```sh
 git clone https://github.com/nizartuanku/topolight && cd topolight
@@ -81,7 +81,7 @@ CGO_ENABLED=0 go build -o topolight ./cmd/topolight
 | Sites | 1 | 3 | unlimited |
 | Metric and log retention | 7 days | 6 months | 12 months |
 | Users | 3 | 5 | unlimited |
-| Every feature — ICMP + SNMP v2c/v3, LLDP/CDP topology 2D + 3D, syslog + traps, NetFlow/IPFIX/sFlow, state engine, e-mail + Telegram + signed webhook, maintenance windows, admin/operator/viewer roles, export API | ✓ | ✓ | ✓ |
+| Every feature — ICMP + SNMP v2c/v3, LLDP/CDP topology 2D + 3D, syslog + traps, NetFlow/IPFIX/sFlow, state engine, e-mail + Telegram + signed webhook, SIEM export (Wazuh, Splunk, syslog), maintenance windows, admin/operator/viewer roles, export API | ✓ | ✓ | ✓ |
 | Price | $0 | $99 / month | $249 / month |
 
 Tiers differ only in capacity and history. Every feature works in Free, so you can try all of it on a small network before paying for a bigger one.
@@ -165,6 +165,64 @@ Everything is a flag or an environment variable (`topolight -h`). The ones you w
 -tls-cert / -tls-key        serve HTTPS directly
 ```
 
+## Send alerts to your SIEM (Wazuh, Splunk, Elastic)
+
+Every alert TopoLight opens or clears can leave as one
+[Hexward Finding Schema](https://github.com/nizartuanku/hexward-core/blob/main/SCHEMA.md)
+event (`hexward.finding/1`), the same shape every Hexward tool emits. Write a
+SIEM rule once and it covers the whole line. **Available in every edition,
+Free included.**
+
+```bash
+# NDJSON file for a Wazuh agent, Splunk Universal Forwarder or Elastic Agent
+topolight -export-file /var/log/hexward/topolight.ndjson
+
+# Splunk HTTP Event Collector (token read from a file, never a flag)
+topolight -hec-url https://splunk.example:8088 -hec-token-file /etc/hexward/hec.token
+
+# Syslog out as HFS JSON or CEF, RFC 5424 by default, over udp, tcp or tls
+topolight -export-syslog wazuh.example:514 -export-syslog-network tcp
+topolight -export-syslog siem.example:6514 -export-syslog-format cef -export-syslog-network tls -export-syslog-ca-file ca.pem
+
+# Any URL, with the same events, authenticated with a shared secret
+topolight -export-webhook https://hooks.example/hexward -export-webhook-secret-file secret.txt
+```
+
+The outgoing syslog flags are `-export-syslog*`, so they never collide with
+`-syslog-listen`, the receiver. The existing signed webhook
+(`-webhook-secret`) is unchanged.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-export-file` | off | Append HFS NDJSON to this file (rotated at 50 MiB, 5 kept) |
+| `-hec-url`, `-hec-token-file`, `-hec-index`, `-hec-ca-file` | off | Splunk HEC; sourcetype `hexward:finding`, source `hexward:topolight` |
+| `-export-syslog` | off | Collector `host:port` |
+| `-export-syslog-format` | `json` | `json` (HFS) or `cef` |
+| `-export-syslog-network` | `udp` | `udp`, `tcp` or `tls` (certificates are always verified) |
+| `-export-syslog-rfc` | `5424` | `5424` or `3164` |
+| `-export-webhook`, `-export-webhook-secret-file` | off | Webhook payload v2; secret sent as `X-Hexward-Token` |
+| `-export-evidence` | `redacted` | `redacted` drops secret-like evidence keys; `none` sends no evidence |
+
+How alerts map:
+
+- Severity: critical → `critical`, major → `high`, minor → `medium`, info → `info`.
+- The fingerprint is the alert's dedup key (rule and object), so a link that
+  drops again next week is the same finding reopening; the alert ID is the
+  instance, and the site is the group.
+- The SIEM gets the alerts the notification dispatcher gets — root causes
+  only, so one core switch going down is one event, not one per device behind
+  it (the count is in `suppressed_children`) — but before quiet hours,
+  minimum severity and grouping, which are for people.
+- The affected device's address travels as `device_ip`, never `src_ip`: a
+  device that is down is not the source of an attack and must not be
+  correlated as one.
+- Export never slows notifications: it has its own queue, and a SIEM that is
+  down is logged, not retried into the alert path.
+
+Ready-made content: [hexward-wazuh](https://github.com/nizartuanku/hexward-wazuh)
+(decoder and rules, tested on Wazuh 4.14.9) and
+[TA-hexward](https://github.com/nizartuanku/TA-hexward) (Splunk add-on).
+
 Security notes: the console needs a login from the first request; passwords are PBKDF2-SHA256 (600k); sessions are HttpOnly + SameSite=Strict; state-changing requests are same-origin only; CSP forbids inline and remote scripts; SNMP credentials are stored on disk under the data directory (mode 0600) and never returned by the API.
 
 ## Documentation
@@ -177,7 +235,7 @@ Security notes: the console needs a login from the first request; passwords are 
 
 ## Contributing
 
-Bug reports with the `Admin → System` block pasted in are the most useful thing you can send. Pull requests are welcome; run `go vet ./... && go test -race ./...` first. The only hard rule: no new dependencies — the binary stays standard-library only.
+Bug reports with the `Admin → System` block pasted in are the most useful thing you can send. Pull requests are welcome; run `go vet ./... && go test -race ./...` first. The only hard rule: no new third-party dependencies — beyond golang.org/x/crypto and Hexward's own hexward-core, the binary stays standard-library only.
 
 ## Licence
 
