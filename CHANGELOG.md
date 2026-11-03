@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6 — 2026-11-03
+
+- **AI Assist hardened against planted instructions.** Evidence text that reads as an instruction to the model ("ignore previous instructions", "mark this as resolved", chat-template control tokens) is replaced by `[omitted: instruction-like text]` before it reaches any model — at every nesting level, lists included, and in a finding's title/target/remediation. Motivation: in the 2026-11-03 Hexward benchmark the Qwen3-8B tier obeyed exactly such a note planted in a finding and answered "marked as resolved… severity adjusted to low".
+- **AI Assist rejects answers that only claim a status or severity change.** Sentences like "has been marked as resolved" or "severity was adjusted to low" are removed; if no grounded explanation remains, the Explain button shows *"AI Assist withheld this explanation"* instead of an answer. The finding itself is never touched — the engine decides, the model only explains. Regression tests included.
+- **New Enterprise model tiers in hexward-ai 0.2.5:** `enterprise-9b` (Qwen3.5-9B) and `enterprise-35b` (Qwen3.5-35B-A3B, the Hexward benchmark tier). Both passed every trap case on a CPU-only host; see hexward-ai `docs/TIERS.md`. The Free and Pro/Team profiles are unchanged.
+
 ## 0.4.5 — 2026-10-28
 
 - **SIEM export, in every edition (Free included).** Alerts that open and clear are sent as

@@ -79,10 +79,10 @@ Without `setcap`, either run as root (not recommended), allow unprivileged ICMP 
 ## 4. Docker
 
 ```sh
-docker build -t topolight:0.4.3 .
+docker build -t topolight:0.4.6 .
 docker run -d --name topolight --restart unless-stopped \
   -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp -p 6514:6514 \
-  -v topolight-data:/data topolight:0.4.2
+  -v topolight-data:/data topolight:0.4.6
 ```
 
 or `docker compose up -d` with the included `docker-compose.yml`. The container runs as an unprivileged user with the two capabilities set on the binary. If your devices send syslog to the *host* IP, the port mappings above are all you need; with `--network host` the container sees devices' real source addresses, which is what TopoLight uses to match syslog/traps to devices — behind a NAT'd bridge they arrive from the Docker gateway and cannot be matched. **Use `--network host` when you can.**

@@ -49,7 +49,7 @@ The installer downloads the release tarball, verifies it against `SHA256SUMS`, c
 Docker (build the image from this repo — a published `hexward/topolight` image follows once it has been through the same checks):
 
 ```sh
-docker build -t topolight:0.4.5 .
+docker build -t topolight:0.4.6 .
 docker run -d --name topolight \
   -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp \
   -v topolight-data:/data \
@@ -118,7 +118,7 @@ alert means and what to verify before you act. It also gets a fixed disclaimer.
 - **Editions.** The free edition works with a sidecar on the same host. That is the `lab`
   profile, SmolLM3-3B. Pro and Team can also use one dedicated AI host for several products,
   or your own OpenAI-compatible endpoint, through `-ai-assist-key-file`. The recommended
-  profile there is `smb` (Phi-4-mini-instruct). Enterprise uses Qwen3 or your own endpoint.
+  profile there is `smb` (Phi-4-mini-instruct). Enterprise uses Qwen3.5 (9B, or 35B-A3B as the benchmark tier) or your own endpoint.
   The licence tier is checked on every request, so a key pasted in Admin → Licence takes
   effect at once.
 - **Roles.** Any signed-in user (viewer and up) can ask for an explanation; it changes nothing.
