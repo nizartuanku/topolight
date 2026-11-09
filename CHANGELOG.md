@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.7 — 2026-11-09
+
+- Fixed: the released 0.4.6 tarball's README still told readers to `docker run` the
+  previous image tag (`topolight:0.4.4`) right after building `topolight:0.4.6`,
+  so following the two commands in order failed with "Unable to find image ...
+  locally" — the same class of bug as 0.4.4 (QC-058), this time the fix landed on
+  `main` the day after the 0.4.6 tag was already cut, so it never reached a
+  published release until now. `docker build`, `docker run`, `docker-compose.yml`,
+  and `internal/version` all pin `0.4.7` consistently in this release.
+
 ## 0.4.6 — 2026-11-03
 
 - **AI Assist hardened against planted instructions.** Evidence text that reads as an instruction to the model ("ignore previous instructions", "mark this as resolved", chat-template control tokens) is replaced by `[omitted: instruction-like text]` before it reaches any model — at every nesting level, lists included, and in a finding's title/target/remediation. Motivation: in the 2026-11-03 Hexward benchmark the Qwen3-8B tier obeyed exactly such a note planted in a finding and answered "marked as resolved… severity adjusted to low".

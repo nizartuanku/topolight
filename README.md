@@ -49,11 +49,11 @@ The installer downloads the release tarball, verifies it against `SHA256SUMS`, c
 Docker (build the image from this repo — a published `hexward/topolight` image follows once it has been through the same checks):
 
 ```sh
-docker build -t topolight:0.4.6 .
+docker build -t topolight:0.4.7 .
 docker run -d --name topolight \
   -p 8433:8433 -p 514:514/udp -p 514:514 -p 162:162/udp -p 2055:2055/udp -p 6343:6343/udp \
   -v topolight-data:/data \
-  topolight:0.4.6
+  topolight:0.4.7
 ```
 
 Or download the tarball from [Releases](https://github.com/nizartuanku/topolight/releases), verify `SHA256SUMS`, and run `./topolight` — everything is flags, `topolight -h` lists them. See [docs/INSTALL.md](docs/INSTALL.md) for systemd, TLS, ports and unprivileged ICMP.
