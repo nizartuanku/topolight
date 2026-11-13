@@ -248,5 +248,4 @@ The **pre-built Pro and Team distribution** sold on Whop is a different artifact
 Part of the **Hexward** line of self-hosted tools ·
 [Whop](https://whop.com/nizar-tuanku/topolight?utm_source=github) ·
 [Instagram](https://instagram.com/nizartuanku) ·
-[YouTube](https://youtube.com/@nizartuanku) ·
-[TikTok](https://tiktok.com/@nizartuanku)
+[YouTube](https://youtube.com/@nizartuanku)
